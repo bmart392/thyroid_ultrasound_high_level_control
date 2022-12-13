@@ -19,7 +19,7 @@ class HighLevelController:
         self.desired_end_effector_force = 0.1  # N
         self.allowable_centroid_error = .1
         self.acceptable_cartesian_error = .1
-        self.standard_scan_step = array([0.8, 0.0, 0.0])
+        self.standard_scan_step = array([0.01, 0.0, 0.0])
         self.move_goal = None
         self.velocity_publisher = None
         self.centroid_error_subscriber = None
@@ -28,10 +28,10 @@ class HighLevelController:
         self.force_readings_subscriber = None
 
         # initialize ros node
-        rospy.init_node('high_level_controller')
+        rospy.init_node('motion_controller')
 
         # create publishers and subscribers
-        self.init_publishers_and_subscribers()
+        self.init_publishers_and_subscirbers()
 
     # --------------------------------------------
     # Callback Functions
@@ -39,21 +39,22 @@ class HighLevelController:
 
     """# capture the cartesian position of the robot
     def cartesian_position_callback(data: FrankaState, self):
-                
+
         # limit the number of previous values stored to 5
         if len(self.cartesian_position_history) >= 5:
             self.cartesian_position_history.pop()
 
         # add the new value to the list
         self.cartesian_position_history.insert(0,
-            (data.header.stamp.sec,
-            array([data.O_T_EE[3],
-            data.O_T_EE[7],
-            data.O_T_EE[11]]))
-            )"""
+                                               (data.header.stamp.sec,
+                                                array([data.O_T_EE[3],
+                                                       data.O_T_EE[7],
+                                                       data.O_T_EE[11]]))
+                                               )"""
 
     # capture the error of the position of image centroid
     def centroid_error_callback(data: Float64, self):
+
         # remove oldest error value if more 5 have already been saved
         if len(self.image_centroid_error_history) >= 5:
             self.image_centroid_error_history.pop()
@@ -67,9 +68,10 @@ class HighLevelController:
         # remove the oldest force value if more than 5 have already been saved
         if len(self.external_force_history) >= 5:
             self.external_force_history.pop()
-        
+
         # save the new error value
-        self.external_force_history.insert((data.head.time.sec, array([data.wrench.force.x, data.wrench.force.y, data.wrench.force.z])))"""
+        self.external_force_history.insert(
+            (data.head.time.sec, array([data.wrench.force.x, data.wrench.force.y, data.wrench.force.z])))"""
 
     # capture if the thyroid is in the current image
     def thyroid_in_image_callback(data: Bool, self):
@@ -110,7 +112,7 @@ class HighLevelController:
     # --------------------------------------------
 
     # create publisher and subscriber objects
-    def init_publishers_and_subscribers(self):
+    def init_publishers_and_subscirbers(self):
         # Create the publisher to publish the desired joint velocities
         self.velocity_publisher = rospy.Publisher('/arm/cartesian/velocity', TwistStamped, queue_size=1)
 
@@ -123,10 +125,16 @@ class HighLevelController:
                                                             self.thyroid_in_image_callback)
 
         """# Create a subscriber to listen to the robot state
-        self.robot_state_subscriber = rospy.Subscriber('/franka_state_controller/franka_states', FrankaState, self.cartesian_position_callback)
+        self.robot_state_subscriber = rospy.Subscriber('/franka_state_controller/franka_states', FrankaState,
+                                                       self.cartesian_position_callback)
 
         # Create a subscriber to listen to the force readings from the robot
-        self.force_readings_subscriber = rospy.Subscriber('/franka_state_controller/F_ext', WrenchStamped, self.force_value_callback)"""
+        self.force_readings_subscriber = rospy.Subscriber('/franka_state_controller/F_ext', WrenchStamped,
+                                                          self.force_value_callback)"""
+
+    # --------------------------------------------
+    # Helper functions
+    # --------------------------------------------
 
 
 if __name__ == '__main__':
@@ -176,171 +184,168 @@ if __name__ == '__main__':
             # change states to center the thyroid in the image
             previous_procedure_state = procedure_state
             procedure_state = CENTER_IMAGE
-            pass
-            """# Create a velocity message that will instruct the robot to
-            # move in the direction of the control inputs.
-            velocity = TwistStamped()
-            velocity.twist.linear.x = control_input_x
-            velocity.twist.linear.y = control_input_y
-            velocity.twist.linear.z = control_input_z
-
-            # Publish the velocity message to the Panda driver at a
-            # frequency of 100Hz
-            velocity_publisher.publish(velocity)
-
-            # if the control input from the image based error is not 0
-            if control_input_x + control_input_y + control_input_z == 0:
-                
-                # save current position as origin of the procedure
-                procedure_origin = cartesian_position_history
-
-                # set flag indicating first time through moving
-                first_pass_move_to_next_scan = True
-
-                # set the next state
-                procedure_state = MOVE_TO_NEXT_SCAN"""
 
         if procedure_state == CENTER_IMAGE:
 
-            # check if the thyroid is in the image and if not act accordingly
-            if controller.thyroid_in_image_status:
+            # move the robot to center the centroid within the allowable error
+            if abs(controller.image_centroid_error_history[0]) > controller.allowable_centroid_error:
 
-                # move the robot to center the centroid within the allowable error
-                if abs(controller.image_centroid_error_history[0]) > controller.allowable_centroid_error:
+                # calculate required control input
+                centroid_control_inputs = controller.image_error_calculate_control_input()
 
-                    # calculate required control input
-                    centroid_control_inputs = controller.image_error_calculate_control_input()
+                # calculate force control inputs
+                force_control_inputs = controller.force_error_calculate_control_input()
 
-                    # calculate force control inputs
-                    force_control_inputs = controller.force_error_calculate_control_input()
+                # generate a message to use to send control inputs
+                centroid_correction_velocity = TwistStamped()
 
-                    # generate a message to use to send control inputs
-                    centroid_correction_velocity = TwistStamped()
+                # assign values to the message
+                centroid_correction_velocity.twist.linear.x = centroid_control_inputs[0] + force_control_inputs[0]
+                centroid_correction_velocity.twist.linear.y = centroid_control_inputs[1] + force_control_inputs[1]
+                centroid_correction_velocity.twist.linear.z = centroid_control_inputs[2] + force_control_inputs[2]
 
-                    # assign values to the message
-                    centroid_correction_velocity.twist.linear.x = centroid_control_inputs[0] + force_control_inputs[0]
-                    centroid_correction_velocity.twist.linear.y = centroid_control_inputs[1] + force_control_inputs[1]
-                    centroid_correction_velocity.twist.linear.z = centroid_control_inputs[2] + force_control_inputs[2]
-
-                    # publish the message
-                    controller.velocity_publisher.publish(centroid_correction_velocity)
-
-                else:
-
-                    # if the list of procedure_waypoints list is empty, save the current position as the origin
-                    if len(procedure_waypoints) == 0:
-                        procedure_origin = controller.cartesian_position_history[0][1]
-
-                    # set placement index based on direction of movement
-                    if current_direction == DIRECTION_HEAD:
-                        placement_index = -1
-                    elif current_direction == DIRECTION_TORSO:
-                        placement_index == 0
-                    else:
-                        placement_index == 0
-
-                    # save the current position as a path waypoint to follow in the future
-                    procedure_waypoints.insert(placement_index, controller.cartesian_position_history[0][1])
-
-                    # set the next state of the procedure
-                    previous_procedure_state = procedure_state
-                    procedure_state = MOVE_TO_NEXT_SCAN
+                # publish the message
+                controller.velocity_publisher.publish(centroid_correction_velocity)
 
             else:
 
-                # check if all waypoints have been found
-                if current_objective == WAYPOINT_FINDING and current_direction == DIRECTION_TORSO:
-                    current_direction = DIRECTION_HEAD
-                    previous_procedure_state = procedure_state
-                    procedure_state = MOVE_TO_ORIGIN
+                # if the list of procedure_waypoints list is empty, save the current position as the origin
+                if len(procedure_waypoints) == 0:
+                    procedure_origin = controller.cartesian_position_history[0][1]
 
-        if procedure_state == MOVE_TO_NEXT_SCAN:
-
-            if first_pass_move_to_next_scan:
-
-                # calculate goal origin to be approximately 2 inches from the current pose 
-                # based on the desired direction
-                if current_direction == DIRECTION_TORSO:
-                    x_offset = controller.standard_scan_step
-                elif current_direction == DIRECTION_HEAD:
-                    x_offset = -1 * controller.standard_scan_step
+                # set placement index based on direction of movement
+                if current_direction == DIRECTION_HEAD:
+                    placement_index = -1
+                elif current_direction == DIRECTION_TORSO:
+                    placement_index == 0
                 else:
-                    x_offset = zeros(3)
+                    placement_index == 0
 
+                # save the current position as a path waypoint to follow in the future
+                procedure_waypoints.insert(placement_index, controller.cartesian_position_history[0][1])
+
+                # set the next state of the procedure
+                previous_procedure_state = procedure_state
+                procedure_state = SET_GOAL
+
+        if procedure_state == SET_GOAL:
+
+            # if the current objective of the procedure is to find waypoints,
+            # set goal point as offset from current position
+
+            if current_objective == WAYPOINT_FINDING:
+
+                # set direction of offset based on current direction of motion
+                x_offset = controller.standard_scan_step * current_direction
+
+                # calculate new goal position
                 controller.move_goal = controller.cartesian_position_history[0][1] + x_offset
 
-                # set control inputs to zero
-                velocity = TwistStamped()
+            elif current_objective == SCANNING:
 
-                # reset the flag
-                first_pass_move_to_next_scan = False
+                # check to make sure there are more waypoints to travel to
+                if len(procedure_waypoints) > 0:
 
-            else:
-
-                if sqrt(sum(controller.move_goal - controller.cartesian_position_history[
-                    0] ** 2)) > controller.acceptable_cartesian_error:
-
-                    # create a message to send control velocities
-                    velocity = TwistStamped()
-
-                    # calculate positional control inputs
-                    positional_control_inputs = controller.cartesian_position_calculate_control_input()
-
-                    # calculate force control inputs = calculate_force_control_inputs
-                    force_control_inputs = controller.force_error_calculate_control_input()
-
-                    velocity.twist.linear.x = positional_control_inputs[0] + force_control_inputs[0]
-                    velocity.twist.linear.y = positional_control_inputs[1] + force_control_inputs[1]
-                    velocity.twist.linear.z = positional_control_inputs[2] + force_control_inputs[2]
+                    # pop out the last waypoint as the goal position
+                    controller.move_goal = procedure_waypoints.pop(-1)
 
                 else:
 
-                    # create an empty message
-                    velocity = TwistStamped()
+                    # exit the procedure
+                    current_objective = EXITING
+                    controller.move_goal = procedure_origin
+            else:
+                # set the new goal position as the origin
+                controller.move_goal = procedure_origin
 
-                    previous_procedure_state = procedure_state
-                    procedure_state = CENTER_IMAGE
+            # set the next state of the procedure
+            previous_procedure_state = procedure_state
+            procedure_state = MOVE_TO_GOAL
+
+        if procedure_state == MOVE_TO_GOAL:
+
+            if sqrt(sum(controller.move_goal - controller.cartesian_position_history[
+                0] ** 2)) > controller.acceptable_cartesian_error:
+
+                # create a message to send control velocities
+                velocity = TwistStamped()
+
+                # calculate positional control inputs
+                positional_control_inputs = controller.cartesian_position_calculate_control_input()
+
+                # calculate force control inputs = calculate_force_control_inputs
+                force_control_inputs = controller.force_error_calculate_control_input()
+
+                velocity.twist.linear.x = positional_control_inputs[0] + force_control_inputs[0]
+                velocity.twist.linear.y = positional_control_inputs[1] + force_control_inputs[1]
+                velocity.twist.linear.z = positional_control_inputs[2] + force_control_inputs[2]
+
+            else:
+
+                # create an empty message
+                velocity = TwistStamped()
+
+                # save the previous state
+                previous_procedure_state = previous_procedure_state
+
+                # if procedure is complete
+                if current_objective == EXITING:
+                    procedure_state = EXIT_PROCEDURE
+
+                # if finding waypoints
+                if current_objective == WAYPOINT_FINDING:
+                    procedure_state = CHECK_FOR_THYROID
+
+                # if scanning for images
+                if current_objective == SCANNING:
+                    procedure_state == SAVE_IMAGE
 
             # Publish the velocity message
             controller.velocity_publisher.publish(velocity)
 
-        if procedure_state == MOVE_TO_ORIGIN:
-            pass
+        if procedure_state == CHECK_FOR_THYROID:
 
-        if procedure_state == FOLLOW_WAYPOINTS:
+            # if the thyroid is in the image, center the image on the thyroid
+            if controller.thyroid_in_image_status:
 
-            # check if a new waypoint needs to be travelled to
-            if reach_new_waypoint:
-                controller.move_goal = procedure_waypoints.pop(0)
+                previous_procedure_state = procedure_state
+                procedure_state = CENTER_IMAGE
 
-        # Program starts execution - robot is placed in the right spot
-        # CHECK SETUP - robot checks if thyroid is in place
-        # IMAGE_CENTERING - robot  centers itself based on image error to within threshold
-        # SET ORIGIN - robot sets current position as origin
-        # ADD WAYPOINT - robot adds the current position as a waypoint
-        # SET GOAL - robot sets new goal as standard offset from current position in current direction
-        # MOVE TO GOAL - robot moves to goal
-        # CHECK FOR THYROID - check if the thyroid is in the image, change direction accordingly
-        # IMAGE CENTERING - robot auto centers itself
-        # ADD WAYPOINT - robot adds the current position as a waypoint
-        # SET GOAL - robot sets next goal
-        # MOVE TO GOAL - robot moves to goal
-        # CHECK FOR THYROID (no thyroid this time) - check if the thyroid is in the image, change direction of motion
-        # MOVE TO ORIGIN - move back to the starting point
-        # SET GOAL - robot sets next goal
-        # MOVE TO GOAL - robot moves to goal
-        # CHECK FOR THYROID - check if the thyroid is in the image, change current objective accordingly
-        # IMAGE CENTERING - robot auto centers itself
-        # ADD WAYPOINT - robot adds the current position as a waypoint
-        # SET GOAL - robot sets next goal
-        # CHECK FOR THYROID (no thyroid this time) - check if the thyroid is in the image, change current objective to scanning
-        # MOVE TO WAYPOINT - pop off last waypoint and go to it
-        # SAVE IMAGE SCAN - save image at current point
-        # MOVE TO WAYPOINT - pop off last waypoint and go to it
-        # SAVE IMAGE SCAN - save image at current point
-        # MOVE TO WAYPOINT (no more waypoints) - go to end of procedure state
-        # END OF PROCEDURE - move back to origin, save data, save logs, exit
-        # 
+            else:
+
+                # save the previous procedure state
+                previous_procedure_state = procedure_state
+
+                # if looking for waypoints and heading towards the torso,
+                # reverse direction and head back to the origin
+                if current_objective == WAYPOINT_FINDING and current_direction == DIRECTION_TORSO:
+                    current_direction = DIRECTION_HEAD
+                    procedure_state = MOVE_TO_GOAL
+
+                    # set the next movement goal as the origin
+                    controller.move_goal = procedure_origin + controller.standard_scan_step * current_direction
+
+                # if looking for waypoints and heading towards the head,
+                # switch to scanning at each discovered waypoint and reverse direction
+                elif current_objective == WAYPOINT_FINDING and current_direction == DIRECTION_HEAD:
+                    current_direction = DIRECTION_TORSO
+                    current_objective = SCANNING
+                    procedure_state = SET_GOAL
+
+        if procedure_state == SAVE_IMAGE:
+            # save the current image
+
+            # save the current robot pose
+
+            # save the image mask
+
+            # save the approximate area of the thyroid in image
+
+            previous_procedure_state = procedure_state
+            procedure_state = SET_GOAL
+
+        if procedure_state == EXIT_PROCEDURE:
+            procedure_complete_flag = True
 
     velocity = TwistStamped()
-    velocity_publisher.publish(velocity)
+    controller.velocity_publisher.publish(velocity)

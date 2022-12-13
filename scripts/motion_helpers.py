@@ -1,5 +1,6 @@
 from numpy import sign
 
+
 # calculate a resulting control input for a given set of gains and errors
 def pd_controller(k_p, k_d, error, error_dot, minimum_control_input, maximum_control_input):
     unbounded_control_input =  k_p * error + k_d * error_dot
@@ -10,6 +11,7 @@ def pd_controller(k_p, k_d, error, error_dot, minimum_control_input, maximum_con
     if abs(unbounded_control_input) < minimum_control_input:
         control_input = minimum_control_input * sign(unbounded_control_input)
     return control_input
+
 
 # calculate average error dot over error history
 def calculate_error(reference_value, error_history):

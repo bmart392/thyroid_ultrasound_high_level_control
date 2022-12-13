@@ -9,7 +9,8 @@ from numpy import sign, array, zeros, sqrt, sum
 from motion_constants import *
 from motion_helpers import *
 
-class motion_controller:
+
+class HighLevelController:
     def __init__(self) -> None:
         self.cartesian_position_history = []
         self.image_centroid_error_history = []
@@ -27,16 +28,16 @@ class motion_controller:
         self.force_readings_subscriber = None
 
         # initialize ros node
-        rospy.init_node('motion_controller')
-        
+        rospy.init_node('high_level_controller')
+
         # create publishers and subscribers
-        self.init_publishers_and_subscirbers()
+        self.init_publishers_and_subscribers()
 
-    #--------------------------------------------
+    # --------------------------------------------
     # Callback Functions
-    #--------------------------------------------
+    # --------------------------------------------
 
-    # capture the cartesian position of the robot
+    """# capture the cartesian position of the robot
     def cartesian_position_callback(data: FrankaState, self):
                 
         # limit the number of previous values stored to 5
@@ -49,19 +50,18 @@ class motion_controller:
             array([data.O_T_EE[3],
             data.O_T_EE[7],
             data.O_T_EE[11]]))
-            )
+            )"""
 
     # capture the error of the position of image centroid
     def centroid_error_callback(data: Float64, self):
-
         # remove oldest error value if more 5 have already been saved
         if len(self.image_centroid_error_history) >= 5:
             self.image_centroid_error_history.pop()
-        
+
         # save the new error value
         self.image_centroid_error_history.append((0, array([0, data.data, 0])))
 
-    # capture the current force felt by the robot
+    """# capture the current force felt by the robot
     def force_value_callback(data: WrenchStamped, self):
 
         # remove the oldest force value if more than 5 have already been saved
@@ -69,21 +69,21 @@ class motion_controller:
             self.external_force_history.pop()
         
         # save the new error value
-        self.external_force_history.insert((data.head.time.sec, array([data.wrench.force.x, data.wrench.force.y, data.wrench.force.z])))
+        self.external_force_history.insert((data.head.time.sec, array([data.wrench.force.x, data.wrench.force.y, data.wrench.force.z])))"""
 
     # capture if the thyroid is in the current image
     def thyroid_in_image_callback(data: Bool, self):
         self.thyroid_in_image_status = data.data
-    
-    #--------------------------------------------
+
+    # --------------------------------------------
     # Control Input Calculation Functions
-    #--------------------------------------------
+    # --------------------------------------------
 
     # calculate the control input based on the image error
     def image_error_calculate_control_input(self):
-        k_p = .1   
-        min_control_speed = 0.001 # m/s
-        max_control_speed = 0.025 # m/s
+        k_p = .1
+        min_control_speed = 0.001  # m/s
+        max_control_speed = 0.025  # m/s
         error = self.image_centroid_error_history[0]
         return pd_controller(k_p, 0, error, 0, min_control_speed, max_control_speed)
 
@@ -102,38 +102,41 @@ class motion_controller:
         k_d = 0.
         min_control_speed = .001  # m/s
         max_control_speed = .025  # m/s
-        error, error_dot  = calculate_error(self.move_goal, self.cartesian_position_history)
+        error, error_dot = calculate_error(self.move_goal, self.cartesian_position_history)
         return pd_controller(k_p, k_d, error, error_dot, min_control_speed, max_control_speed)
 
-    #--------------------------------------------
+    # --------------------------------------------
     # Define ROS features
-    #--------------------------------------------
-    
+    # --------------------------------------------
+
     # create publisher and subscriber objects
-    def init_publishers_and_subscirbers(self):
+    def init_publishers_and_subscribers(self):
         # Create the publisher to publish the desired joint velocities
         self.velocity_publisher = rospy.Publisher('/arm/cartesian/velocity', TwistStamped, queue_size=1)
 
         # Create a subscriber to listen to the error gathered from ultrasound images
-        self.centroid_error_subscriber = rospy.Subscriber('/image_data/centroid_error', Float64, self.centroid_error_callback)
+        self.centroid_error_subscriber = rospy.Subscriber('/image_data/centroid_error', Float64,
+                                                          self.centroid_error_callback)
 
         # Create a subscriber to listen to the error gathered from ultrasound images
-        self.thyroid_in_image_subscriber = rospy.Subscriber('/image_data/thyroid_in_image', Bool, self.thyroid_in_image_callback)
+        self.thyroid_in_image_subscriber = rospy.Subscriber('/image_data/thyroid_in_image', Bool,
+                                                            self.thyroid_in_image_callback)
 
-        # Create a subscriber to listen to the robot state
+        """# Create a subscriber to listen to the robot state
         self.robot_state_subscriber = rospy.Subscriber('/franka_state_controller/franka_states', FrankaState, self.cartesian_position_callback)
 
         # Create a subscriber to listen to the force readings from the robot
-        self.force_readings_subscriber = rospy.Subscriber('/franka_state_controller/F_ext', WrenchStamped, self.force_value_callback)
+        self.force_readings_subscriber = rospy.Subscriber('/franka_state_controller/F_ext', WrenchStamped, self.force_value_callback)"""
+
 
 if __name__ == '__main__':
 
     # create motion_controller object and start up ROS objects
-    controller = motion_controller()
+    controller = HighLevelController()
 
-    #--------------------------------------------
+    # --------------------------------------------
     # Define state machine parameters
-    #--------------------------------------------
+    # --------------------------------------------
 
     # initialize status of procedure
     procedure_complete_flag = False
@@ -148,9 +151,9 @@ if __name__ == '__main__':
     # intialize direction of scanning
     current_direction = DIRECTION_TORSO
 
-    #--------------------------------------------
+    # --------------------------------------------
     # Define variables to store results from procedure
-    #--------------------------------------------
+    # --------------------------------------------
 
     # initialize empty stored sate for start of procedure
     procedure_origin = array([])
@@ -159,7 +162,7 @@ if __name__ == '__main__':
     procedure_waypoints = []
 
     # Set rate for publishing new velocities
-    rate = rospy.Rate(100) #hz
+    rate = rospy.Rate(100)  # hz
 
     # loop until the routine has been finished or interrupted
     while not rospy.is_shutdown() and not procedure_complete_flag:
@@ -201,7 +204,7 @@ if __name__ == '__main__':
 
             # check if the thyroid is in the image and if not act accordingly
             if controller.thyroid_in_image_status:
-            
+
                 # move the robot to center the centroid within the allowable error
                 if abs(controller.image_centroid_error_history[0]) > controller.allowable_centroid_error:
 
@@ -223,7 +226,7 @@ if __name__ == '__main__':
                     controller.velocity_publisher.publish(centroid_correction_velocity)
 
                 else:
-                    
+
                     # if the list of procedure_waypoints list is empty, save the current position as the origin
                     if len(procedure_waypoints) == 0:
                         procedure_origin = controller.cartesian_position_history[0][1]
@@ -242,7 +245,7 @@ if __name__ == '__main__':
                     # set the next state of the procedure
                     previous_procedure_state = procedure_state
                     procedure_state = MOVE_TO_NEXT_SCAN
-            
+
             else:
 
                 # check if all waypoints have been found
@@ -252,7 +255,7 @@ if __name__ == '__main__':
                     procedure_state = MOVE_TO_ORIGIN
 
         if procedure_state == MOVE_TO_NEXT_SCAN:
-            
+
             if first_pass_move_to_next_scan:
 
                 # calculate goal origin to be approximately 2 inches from the current pose 
@@ -271,17 +274,18 @@ if __name__ == '__main__':
 
                 # reset the flag
                 first_pass_move_to_next_scan = False
-            
+
             else:
 
-                if sqrt(sum(controller.move_goal - controller.cartesian_position_history[0] ** 2)) > controller.acceptable_cartesian_error: 
-                
+                if sqrt(sum(controller.move_goal - controller.cartesian_position_history[
+                    0] ** 2)) > controller.acceptable_cartesian_error:
+
                     # create a message to send control velocities
                     velocity = TwistStamped()
 
                     # calculate positional control inputs
                     positional_control_inputs = controller.cartesian_position_calculate_control_input()
-                    
+
                     # calculate force control inputs = calculate_force_control_inputs
                     force_control_inputs = controller.force_error_calculate_control_input()
 
@@ -296,7 +300,7 @@ if __name__ == '__main__':
 
                     previous_procedure_state = procedure_state
                     procedure_state = CENTER_IMAGE
-            
+
             # Publish the velocity message
             controller.velocity_publisher.publish(velocity)
 
@@ -304,13 +308,10 @@ if __name__ == '__main__':
             pass
 
         if procedure_state == FOLLOW_WAYPOINTS:
-            
+
             # check if a new waypoint needs to be travelled to
             if reach_new_waypoint:
                 controller.move_goal = procedure_waypoints.pop(0)
-            
-
-
 
         # Program starts execution - robot is placed in the right spot
         # CHECK SETUP - robot checks if thyroid is in place

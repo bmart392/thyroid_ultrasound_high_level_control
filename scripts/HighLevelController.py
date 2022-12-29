@@ -12,29 +12,37 @@ from motion_helpers import *
 
 class HighLevelController:
     def __init__(self) -> None:
-
         self.cartesian_position_history = []
         # self.image_centroid_error_history = []
         # self.external_force_history = []
-        self.thyroid_in_image_status = True
-        self.is_thyroid_centered = False
-        self.was_last_goal_position_reached = False
+        self.thyroid_shown = False
+        self.thyroid_centered = False
+        self.goal_reached = False
         # self.desired_end_effector_force = 0.1  # N
         # self.allowable_centroid_error = .1
         # self.acceptable_cartesian_error = .1
         self.standard_scan_step = array([0.01, 0.0, 0.0])
         self.move_goal = None
 
-        # Command publishers
-        self.goal_pose_publisher: rospy.Publisher = None
-        self.desired_force_publisher: rospy.Publisher = None
-        self.stop_motion_publisher: rospy.Publisher = None
-        self.active_image_centering_status_publisher: rospy.Publisher = None
+        # initialize ros node
+        rospy.init_node('high_level_controller')
 
         # Status subscribers
-        self.is_thyroid_in_image_status_subscriber: rospy.Subscriber = None
-        self.is_thyroid_centered_status_subscriber: rospy.Subscriber = None
-        self.was_last_goal_reached_status_subscriber: rospy.Subscriber = None
+        self.thyroid_shown_subscriber = rospy.Subscriber('/status/thyroid_shown', Bool, self.thyroid_shown_callback)
+        self.thyroid_centered_subscriber = rospy.Subscriber('/status/thyroid_centered', Bool,
+                                                            self.thyroid_centered_callback)
+        self.goal_reached_subscriber = rospy.Subscriber('/status/goal_reached', Bool, self.goal_reached_callback)
+
+        # Goal publishers
+        self.goal_pose_publisher = rospy.Publisher('/goal/pose', TwistStamped, queue_size=1)
+        self.goal_force_publisher = rospy.Publisher('/goal/force', WrenchStamped, queue_size=1)
+        
+        # Command Publishers
+        self.stop_motion_publisher = rospy.Publisher('/command/stop_motion', Bool, queue_size=1)
+        self.center_image_publisher = rospy.Publisher('/command/center_image', Bool, queue_size=1)
+        self.move_to_goal_publisher = rospy.Publisher('/command/move_to_goal', Bool, queue_size=1)
+        self.use_force_feedback_publisher = rospy.Publisher('/command/use_force_feedback', Bool, queue_size=1)
+        self.filter_images_publisher = rospy.Publisher('/command/filter_images', Bool, queue_size=1)
 
         # self.velocity_publisher = None
         # self.centroid_error_subscriber = None
@@ -42,68 +50,33 @@ class HighLevelController:
         # self.robot_state_subscriber = None
         # self.force_readings_subscriber = None
 
-        # initialize ros node
-        rospy.init_node('motion_controller')
-
-        # create publishers and subscribers
-        self.init_publishers_and_subscribers()
-
     # --------------------------------------------
     # Callback Functions
     # --------------------------------------------
 
     # capture if the thyroid is in the current image
-    def is_thyroid_in_image_status_callback(self, data: Bool):
-        self.thyroid_in_image_status = data.data
+    def thyroid_shown_callback(self, data: Bool):
+        self.thyroid_shown = data.data
 
     # capture if the thyroid is centered in the image
-    def is_thyroid_centered_status_callback(self, data: Bool):
-        self.is_thyroid_centered = data.data
+    def thyroid_centered_callback(self, data: Bool):
+        self.thyroid_centered = data.data
 
     # capture the status of the motion to reach the last sent goal point
-    def was_last_goal_reached_status_callback(self, data: Bool):
-        self.was_last_goal_position_reached = data.data
-
-    # --------------------------------------------
-    # Define ROS features
-    # --------------------------------------------
-
-    # create publisher and subscriber objects
-    def init_publishers_and_subscribers(self):
-
-        # Create a publisher to publish goal positions
-        self.goal_pose_publisher = rospy.Publisher('/command/goal_pose', TwistStamped, queue_size=1)
-
-        # Create a publisher to publish the desired applied force
-        self.desired_force_publisher = rospy.Publisher('/command/desired_force', WrenchStamped, queue_size=1)
-
-        # Create a publisher to publish a stop-motion command
-        self.stop_motion_publisher = rospy.Publisher('/command/stop_motion', Bool, queue_size=1)
-
-        # Create a publisher to publish the status of the image centering motions
-        self.active_image_centering_status_publisher = rospy.Publisher('/command/center_image', Bool, queue_size=1)
-
-        # Create a subscriber to check if the thyroid is in the image
-        self.is_thyroid_in_image_status_subscriber = rospy.Subscriber('/status/thyroid_shown', Bool,
-                                                                      self.is_thyroid_in_image_status_callback)
-
-        # Create a subscriber to check if the image is centered
-        self.is_thyroid_centered_status_subscriber = rospy.Subscriber('/status/thyroid_centered', Bool,
-                                                                      self.is_thyroid_centered_status_callback)
-
-        # Create a subscriber to check if the last goal sent was reached
-        self.was_last_goal_reached_status_subscriber = rospy.Subscriber('/status/goal_reached', Bool,
-                                                                        self.was_last_goal_reached_status_callback)
-
-    # --------------------------------------------
-    # Helper functions
-    # --------------------------------------------
+    def goal_reached_callback(self, data: Bool):
+        self.goal_reached = data.data
 
 
 if __name__ == '__main__':
 
     # create motion_controller object and start up ROS objects
     controller = HighLevelController()
+
+    print("Node Initialized. Press CTRL+C to terminate.")
+    print("Waiting for other nodes to start.")
+
+    # wait for other nodes to start and send messages
+    rospy.sleep(5)
 
     # --------------------------------------------
     # Define state machine parameters
@@ -119,7 +92,7 @@ if __name__ == '__main__':
     # initialize flag indicating if in waypoint finding or scanning portion of procedure
     current_objective = WAYPOINT_FINDING
 
-    # intialize direction of scanning
+    # initialize direction of scanning
     current_direction = DIRECTION_TORSO
 
     # --------------------------------------------
@@ -141,11 +114,12 @@ if __name__ == '__main__':
         if procedure_state == CHECK_SETUP:
 
             # check that the thyroid is in the image
-            if not controller.thyroid_in_image_status:
+            if not controller.thyroid_shown:
+                "Procedure is not ready to start. Thyroid is not shown."
                 procedure_complete_flag = True
 
             else:
-                print("pass")
+                print("Procedure is ready to start.")
                 # change states to center the thyroid in the image
                 previous_procedure_state = procedure_state
                 procedure_state = CENTER_IMAGE
@@ -153,15 +127,14 @@ if __name__ == '__main__':
         if procedure_state == CENTER_IMAGE:
 
             # if the image is not centered
-            if not controller.is_thyroid_centered:
-
+            if not controller.thyroid_centered:
                 # Publish that the image needs to be centered
-                controller.active_image_centering_status_publisher.publish(Bool(True))
+                controller.center_image_publisher.publish(Bool(True))
 
             else:
 
                 # Publish that active image centering is no longer needed
-                controller.active_image_centering_status_publisher.publish(Bool(False))
+                controller.center_image_publisher.publish(Bool(False))
 
                 # if the list of procedure_waypoints list is empty, save the current position as the origin
                 if len(procedure_waypoints) == 0:
@@ -218,7 +191,7 @@ if __name__ == '__main__':
         if procedure_state == MOVE_TO_GOAL:
 
             # if the current goal has not been reached
-            if not controller.was_last_goal_position_reached:
+            if not controller.goal_reached:
 
                 # generate a new pose message
                 new_pose = TwistStamped()
@@ -254,7 +227,7 @@ if __name__ == '__main__':
         if procedure_state == CHECK_FOR_THYROID:
 
             # if the thyroid is in the image, center the image on the thyroid
-            if controller.thyroid_in_image_status:
+            if controller.thyroid_shown:
 
                 previous_procedure_state = procedure_state
                 procedure_state = CENTER_IMAGE

@@ -18,10 +18,11 @@ class HighLevelController:
         self.thyroid_shown = False
         self.thyroid_centered = False
         self.goal_reached = False
+        self.current_pose = zeros(7)
         # self.desired_end_effector_force = 0.1  # N
         # self.allowable_centroid_error = .1
         # self.acceptable_cartesian_error = .1
-        self.standard_scan_step = array([0.01, 0.0, 0.0])
+        self.standard_scan_step = array([0.01, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.move_goal = None
 
         # initialize ros node
@@ -32,9 +33,10 @@ class HighLevelController:
         self.thyroid_centered_subscriber = rospy.Subscriber('/status/thyroid_centered', Bool,
                                                             self.thyroid_centered_callback)
         self.goal_reached_subscriber = rospy.Subscriber('/status/goal_reached', Bool, self.goal_reached_callback)
+        self.current_pose_subscriber = rospy.Subscriber('/status/current_pose', PoseStamped, self.current_pose_callback)
 
         # Goal publishers
-        self.goal_pose_publisher = rospy.Publisher('/goal/pose', TwistStamped, queue_size=1)
+        self.goal_pose_publisher = rospy.Publisher('/goal/pose', PoseStamped, queue_size=1)
         self.goal_force_publisher = rospy.Publisher('/goal/force', WrenchStamped, queue_size=1)
         
         # Command Publishers
@@ -65,6 +67,15 @@ class HighLevelController:
     # capture the status of the motion to reach the last sent goal point
     def goal_reached_callback(self, data: Bool):
         self.goal_reached = data.data
+
+    def current_pose_callback(self, data: PoseStamped):
+        self.current_pose[0] = data.pose.position.x
+        self.current_pose[1] = data.pose.position.y
+        self.current_pose[2] = data.pose.position.z
+        self.current_pose[3] = data.pose.orientation.x
+        self.current_pose[4] = data.pose.orientation.y
+        self.current_pose[5] = data.pose.orientation.z
+        self.current_pose[6] = data.pose.orientation.w
 
 
 if __name__ == '__main__':
@@ -99,11 +110,14 @@ if __name__ == '__main__':
     # Define variables to store results from procedure
     # --------------------------------------------
 
-    # initialize empty stored sate for start of procedure
+    # initialize empty stored state for start of procedure
     procedure_origin = array([])
 
     # initialize empty array to store the path waypoints
     procedure_waypoints = []
+
+    # save the current waypoint the robot is at
+    current_waypoint = None
 
     # Set rate for publishing new velocities
     rate = rospy.Rate(100)  # hz
@@ -138,7 +152,7 @@ if __name__ == '__main__':
 
                 # if the list of procedure_waypoints list is empty, save the current position as the origin
                 if len(procedure_waypoints) == 0:
-                    procedure_origin = controller.cartesian_position_history[0][1]
+                    procedure_origin = controller.current_pose  # controller.cartesian_position_history[0][1]
 
                 # set placement index based on direction of movement
                 if current_direction == DIRECTION_HEAD:
@@ -149,7 +163,10 @@ if __name__ == '__main__':
                     placement_index = 0
 
                 # save the current position as a path waypoint to follow in the future
-                procedure_waypoints.insert(placement_index, controller.cartesian_position_history[0][1])
+                procedure_waypoints.insert(placement_index, controller.current_pose)
+
+                # save the current waypoint of the robot
+                current_waypoint = controller.current_pose
 
                 # set the next state of the procedure
                 previous_procedure_state = procedure_state
@@ -165,7 +182,7 @@ if __name__ == '__main__':
                 x_offset = controller.standard_scan_step * current_direction
 
                 # calculate new goal position
-                controller.move_goal = controller.cartesian_position_history[0][1] + x_offset
+                controller.move_goal = current_waypoint + x_offset
 
             elif current_objective == SCANNING:
 
@@ -194,15 +211,15 @@ if __name__ == '__main__':
             if not controller.goal_reached:
 
                 # generate a new pose message
-                new_pose = TwistStamped()
+                new_pose = PoseStamped()
 
                 # fill out message with goal point
-                new_pose.twist.linear.x = controller.move_goal[0]
-                new_pose.twist.linear.y = controller.move_goal[1]
-                new_pose.twist.linear.z = controller.move_goal[2]
+                new_pose.pose.position.x = controller.move_goal[0]
+                new_pose.pose.position.y = controller.move_goal[1]
+                new_pose.pose.position.z = controller.move_goal[2]
 
                 # Publish the goal pose
-                controller.goal_pose_publisher.publish(TwistStamped())
+                controller.goal_pose_publisher.publish(new_pose)
 
             else:
 

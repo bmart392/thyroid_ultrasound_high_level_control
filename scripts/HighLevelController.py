@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 
 import rospy
-from geometry_msgs.msg import TwistStamped, PoseStamped, WrenchStamped
+from geometry_msgs.msg import PoseStamped, WrenchStamped
 # from franka_msgs import FrankaState
 # from rv_msgs.msg import ManipulatorState
-from std_msgs.msg import Float64, String, Bool
-from numpy import sign, array, zeros, sqrt, sum
+from std_msgs.msg import String, Bool
+from numpy import array, zeros
 from motion_constants import *
-from motion_helpers import *
+# from motion_helpers import *
 
 
 class HighLevelController:
@@ -22,7 +22,7 @@ class HighLevelController:
         # self.desired_end_effector_force = 0.1  # N
         # self.allowable_centroid_error = .1
         # self.acceptable_cartesian_error = .1
-        self.standard_scan_step = array([0.01, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        self.standard_scan_step = array([0.0, 0.01, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.move_goal = None
 
         # initialize ros node
@@ -35,10 +35,14 @@ class HighLevelController:
         self.goal_reached_subscriber = rospy.Subscriber('/status/goal_reached', Bool, self.goal_reached_callback)
         self.current_pose_subscriber = rospy.Subscriber('/status/current_pose', PoseStamped, self.current_pose_callback)
 
+        # Status publishers
+        self.high_level_controller_state_publisher = rospy.Publisher('/status/high_level_controller_state',
+                                                                     String, queue_size=1)
+
         # Goal publishers
         self.goal_pose_publisher = rospy.Publisher('/goal/pose', PoseStamped, queue_size=1)
         self.goal_force_publisher = rospy.Publisher('/goal/force', WrenchStamped, queue_size=1)
-        
+
         # Command Publishers
         self.stop_motion_publisher = rospy.Publisher('/command/stop_motion', Bool, queue_size=1)
         self.center_image_publisher = rospy.Publisher('/command/center_image', Bool, queue_size=1)
@@ -77,14 +81,19 @@ class HighLevelController:
         self.current_pose[5] = data.pose.orientation.z
         self.current_pose[6] = data.pose.orientation.w
 
+    def current_state_publish(self, message):
+        self.high_level_controller_state_publisher.publish(String(message))
+
 
 if __name__ == '__main__':
 
     # create motion_controller object and start up ROS objects
     controller = HighLevelController()
-
     print("Node Initialized. Press CTRL+C to terminate.")
-    print("Waiting for other nodes to start.")
+
+    # publish the current status of the node
+    status_message = "Waiting for other nodes to start."
+    controller.current_state_publish(status_message)
 
     # wait for other nodes to start and send messages
     rospy.sleep(5)
@@ -125,27 +134,40 @@ if __name__ == '__main__':
     # loop until the routine has been finished or interrupted
     while not rospy.is_shutdown() and not procedure_complete_flag:
 
+        # check that the thyroid is in the image before starting the procedure
         if procedure_state == CHECK_SETUP:
 
-            # check that the thyroid is in the image
+            # exit if the thyroid is not in the image
             if not controller.thyroid_shown:
-                "Procedure is not ready to start. Thyroid is not shown."
+
+                status_message = "Procedure is not ready to start. Thyroid is not shown."
+
+                # exit the while loop
                 procedure_complete_flag = True
 
+            # else continue to the next state
             else:
-                print("Procedure is ready to start.")
+
+                status_message = "Procedure is ready to start."
+
                 # change states to center the thyroid in the image
                 previous_procedure_state = procedure_state
                 procedure_state = CENTER_IMAGE
 
+        # command the robot control node to center the robot in the image
         if procedure_state == CENTER_IMAGE:
 
             # if the image is not centered
             if not controller.thyroid_centered:
+
+                status_message = "Centering the thyroid in the image."
+
                 # Publish that the image needs to be centered
                 controller.center_image_publisher.publish(Bool(True))
 
             else:
+
+                status_message = "The thyroid has been centered in the ultrasound image."
 
                 # Publish that active image centering is no longer needed
                 controller.center_image_publisher.publish(Bool(False))
@@ -172,11 +194,14 @@ if __name__ == '__main__':
                 previous_procedure_state = procedure_state
                 procedure_state = SET_GOAL
 
+        # set the next position for the robot to move to
         if procedure_state == SET_GOAL:
 
             # if the current objective of the procedure is to find waypoints,
             # set goal point as offset from current position
             if current_objective == WAYPOINT_FINDING:
+
+                status_message = "Finding next waypoint. Moving one standard step."
 
                 # set direction of offset based on current direction of motion
                 x_offset = controller.standard_scan_step * current_direction
@@ -185,6 +210,8 @@ if __name__ == '__main__':
                 controller.move_goal = current_waypoint + x_offset
 
             elif current_objective == SCANNING:
+
+                status_message = "Completing final scans of the thyroid. Moving to previously found waypoint."
 
                 # check to make sure there are more waypoints to travel to
                 if len(procedure_waypoints) > 0:
@@ -205,10 +232,13 @@ if __name__ == '__main__':
             previous_procedure_state = procedure_state
             procedure_state = MOVE_TO_GOAL
 
+        # move to previously decided goal
         if procedure_state == MOVE_TO_GOAL:
 
             # if the current goal has not been reached
             if not controller.goal_reached:
+
+                status_message = "Moving to goal point. Goal point has not been reached yet."
 
                 # generate a new pose message
                 new_pose = PoseStamped()
@@ -222,6 +252,8 @@ if __name__ == '__main__':
                 controller.goal_pose_publisher.publish(new_pose)
 
             else:
+
+                status_message = "Moving to goal point. Goal point has been reached."
 
                 # Publish a message telling the robot to stop moving
                 controller.stop_motion_publisher.publish(Bool(True))
@@ -241,10 +273,13 @@ if __name__ == '__main__':
                 if current_objective == SCANNING:
                     procedure_state = SAVE_IMAGE
 
+        # check to see if the thyroid is in the image
         if procedure_state == CHECK_FOR_THYROID:
 
             # if the thyroid is in the image, center the image on the thyroid
             if controller.thyroid_shown:
+
+                status_message = "Thyroid is visible in the image."
 
                 previous_procedure_state = procedure_state
                 procedure_state = CENTER_IMAGE
@@ -257,20 +292,30 @@ if __name__ == '__main__':
                 # if looking for waypoints and heading towards the torso,
                 # reverse direction and head back to the origin
                 if current_objective == WAYPOINT_FINDING and current_direction == DIRECTION_TORSO:
+
+                    status_message = "Thyroid is not visible. Reversing direction of waypoint finding."
+
                     current_direction = DIRECTION_HEAD
                     procedure_state = MOVE_TO_GOAL
 
-                    # set the next movement goal as the origin
+                    # set the next movement goal as the origin plus an offset
                     controller.move_goal = procedure_origin + controller.standard_scan_step * current_direction
 
                 # if looking for waypoints and heading towards the head,
                 # switch to scanning at each discovered waypoint and reverse direction
                 elif current_objective == WAYPOINT_FINDING and current_direction == DIRECTION_HEAD:
+
+                    status_message = "Thyroid is not visible. Reversing direction and starting scanning."
+
                     current_direction = DIRECTION_TORSO
                     current_objective = SCANNING
                     procedure_state = SET_GOAL
 
+        # save the current ultrasound image
         if procedure_state == SAVE_IMAGE:
+
+            status_message = "Saving current ultrasound image."
+
             # save the current image
 
             # save the current robot pose
@@ -282,5 +327,11 @@ if __name__ == '__main__':
             previous_procedure_state = procedure_state
             procedure_state = SET_GOAL
 
+        # exit the state machine
         if procedure_state == EXIT_PROCEDURE:
             procedure_complete_flag = True
+
+        # publish the current state of the controller
+        controller.current_state_publish(status_message)
+
+    print("Shutting down node.")

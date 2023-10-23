@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+
+<launch>
+
+    
+    <!-- define the arguement to the launch file -->
+    <arg name="testing_mode" default="false"/>
+    
+    
+    <group if="$(arg testing_mode)">
+    
+       <!-- start the experiment controller -->
+       <node name="UserInterface" pkg="thyroid_ultrasound_high_level_control" type="UserInterface.py" args="--testing_mode"/>
+       
+       <include file="$(find thyroid_ultrasound_imaging)/launch/spoof_data.launch"/>
+    </group>
+    
+    <group unless="$(arg testing_mode)">
+    
+       <!-- start the experiment controller -->
+       <node name="UserInterface" pkg="thyroid_ultrasound_high_level_control" type="UserInterface.py"/>
+       
+       <include file="$(find thyroid_ultrasound_imaging)/launch/core_nodes.launch"/>
+    </group>
+    
+    
+    
+
+</launch>

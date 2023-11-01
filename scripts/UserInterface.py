@@ -13,7 +13,7 @@ from argparse import ArgumentParser
 # Import ROS packages
 from rospy import init_node, Publisher, Subscriber
 from geometry_msgs.msg import WrenchStamped
-from std_msgs.msg import Bool, String, Float64
+from std_msgs.msg import Bool, String, Float64, UInt8
 
 # Import custom ROS packages
 from thyroid_ultrasound_high_level_control.msg import log_message
@@ -46,12 +46,17 @@ WIDGET_STATE: str = 'state'
 FULL_WIDTH: int = int(5)
 THREE_COLUMN: int = int(3)
 TWO_COLUMN: int = int(2)
+
 SINGLE_COLUMN: int = int(1)
 LEFT_COLUMN: int = int(0)
 L_MIDDLE_COLUMN: int = int(2)
 MIDDLE_COLUMN: int = int(3)
 R_MIDDLE_COLUMN: int = int(4)
 RIGHT_COLUMN: int = int(5)
+
+SINGLE_ROW: int = int(1)
+DOUBLE_ROW: int = int(2)
+
 GRAPHICS_WINDOW: int = int(3)
 
 # Define empty status string
@@ -72,9 +77,8 @@ class UserInterface:
         parser = ArgumentParser()
         parser.add_argument("--testing_mode", "--tm", dest="testing_mode", action="store_true", default=False,
                             help="Functionality of the GUI")
-        parser.add_argument("__name")
-        parser.add_argument("__log")
-        #parser.set_defaults(action="store_false")
+        parser.add_argument("__name", default="")
+        parser.add_argument("__log", default="")
 
         # Parse the arguments passed to the code
         passed_arguments = parser.parse_args()
@@ -87,12 +91,19 @@ class UserInterface:
         init_node('UserInterface')
 
         # Create a subscriber to listen to the external force felt by the robot
-        self.robot_sensed_force_subscriber = Subscriber('/franka_state_controller/F_ext', WrenchStamped,
-                                                        self.robot_sensed_force_callback)
+        Subscriber('/force_control/sensed_force_cleaned', WrenchStamped, self.robot_sensed_force_callback)
 
         # Create a subscriber to hear debug messages
-        self.debug_status_messages_subscriber = Subscriber('/system/logging', log_message,
-                                                           self.debug_status_messages_callback)
+        Subscriber('/system/logging', log_message, self.debug_status_messages_callback)
+
+        # Create subscribers to listen to the PID values from the robot control node
+        self.pid_controller_publisher = Publisher('/tuning/controller', UInt8, queue_size=1)
+        Subscriber('/tuning/current/p_gain', Float64, self.p_gain_message_callback)
+        Subscriber('/tuning/current/i_gain', Float64, self.i_gain_message_callback)
+        Subscriber('/tuning/current/d_gain', Float64, self.d_gain_message_callback)
+        self.p_gain_publisher = Publisher('/tuning/setting/p_gain', Float64, queue_size=1)
+        self.i_gain_publisher = Publisher('/tuning/setting/i_gain', Float64, queue_size=1)
+        self.d_gain_publisher = Publisher('/tuning/setting/d_gain', Float64, queue_size=1)
 
         # Create a publisher to publish the command to start and stop filtering images
         self.filter_images_command_publisher = Publisher('/command/filter_images', Bool, queue_size=1)
@@ -139,10 +150,10 @@ class UserInterface:
                                                                         Bool, queue_size=1)
 
         # Create a publisher to publish the command to scan upwards
-        self.scan_upwards_command_publisher = Publisher('/command/scan_upwards', Bool, queue_size=1)
+        self.scan_command_publisher = Publisher('/command/create_trajectory', Float64, queue_size=1)
 
         # Create a publisher to publish the command to scan downwards
-        self.scan_downwards_command_publisher = Publisher('/command/scan_downwards', Bool, queue_size=1)
+        # self.scan_downwards_command_publisher = Publisher('/command/scan_downwards', Bool, queue_size=1)
 
         # Create a publisher to publish the command to complete a full scan
         self.complete_full_scan_command_publisher = Publisher('/command/complete_full_scan', Bool, queue_size=1)
@@ -152,6 +163,9 @@ class UserInterface:
 
         # Create a publisher to publish the command to display the generated volume
         self.display_volume_command_publisher = Publisher('/command/display_volume', Bool, queue_size=1)
+
+        # Create a publisher to publish the imaging depth of the US probe
+        self.imaging_depth_publisher = Publisher('/image_data/imaging_depth', Float64, queue_size=1)
 
         # endregion
         # ---------------------------------------
@@ -182,12 +196,14 @@ class UserInterface:
         thyroid_exam_frame = ttk.Frame(tab_controller)
         nodule_exam_frame = ttk.Frame(tab_controller)
         status_logging_frame = ttk.Frame(tab_controller)
+        developer_frame = ttk.Frame(tab_controller)
 
         # Add the frames to the tab controller
         tab_controller.add(exam_setup_frame, text="Exam Setup")
         tab_controller.add(thyroid_exam_frame, text="Thyroid Exam")
         tab_controller.add(nodule_exam_frame, text="Nodule Exam")
         tab_controller.add(status_logging_frame, text="Status Logger")
+        tab_controller.add(developer_frame, text="Developer")
 
         # Define the widgets used in the always_visible_frame
         # region
@@ -215,9 +231,9 @@ class UserInterface:
 
         # List the widgets used for general control in the always visible frame at the bottom
         always_visible_streaming_widgets = [
-            (self.image_filtering_button, MIDDLE_COLUMN, SINGLE_COLUMN, 0, 1),
-            (self.force_control_button, R_MIDDLE_COLUMN, SINGLE_COLUMN, 0, 1),
-            (self.allow_robot_movement_button, RIGHT_COLUMN, SINGLE_COLUMN, 0, 1),
+            (self.image_filtering_button, MIDDLE_COLUMN, SINGLE_COLUMN, 0, SINGLE_ROW),
+            (self.force_control_button, R_MIDDLE_COLUMN, SINGLE_COLUMN, 0, SINGLE_ROW),
+            (self.allow_robot_movement_button, RIGHT_COLUMN, SINGLE_COLUMN, 0, SINGLE_ROW),
         ]
 
         # Select which widgets to display in the always_visible_frame based on which function mode the GUI is in
@@ -229,10 +245,10 @@ class UserInterface:
 
         # Define the widgets used in the exam_setup_frame
         # region
-        validation_command = self.parent.register(self.force_set_point_entry_validation)
+        validation_command = self.parent.register(self.entry_widget_float_validation)
         self.force_set_point_entry = ttk.Entry(exam_setup_frame, validate=ALL,
                                                validatecommand=(validation_command, '%P'))
-        self.force_set_point_entry.bind('<Return>', self.force_set_point_submit_callback)
+        # self.force_set_point_entry.bind('<Return>', self.force_set_point_submit_callback)
         self.force_set_point_entry.insert(0, '0.0')
         force_set_point_increase_button = ttk.Button(exam_setup_frame, text="+",
                                                      command=lambda: self.force_set_point_change_incremental(
@@ -253,24 +269,35 @@ class UserInterface:
                                                               text="Load Existing Image Cropping",
                                                               command=self.load_existing_image_cropping_button_callback,
                                                               state=DISABLED)
+        self.imaging_depth_entry = ttk.Entry(exam_setup_frame, validate=ALL,
+                                             validatecommand=(validation_command, '%P'))
+        self.imaging_depth_entry.insert(0, '5.0')
+        self.imaging_depth_submit_callback()
 
         # List the widgets used to populate the exam_setup_frame
         self.exam_setup_widgets = [
-            (ttk.Label(exam_setup_frame, text="Current Set-point (N):"), LEFT_COLUMN, SINGLE_COLUMN, 0, 2),
-            (self.force_set_point_entry, L_MIDDLE_COLUMN, SINGLE_COLUMN, 0, 2),
-            (force_set_point_increase_button, MIDDLE_COLUMN, SINGLE_COLUMN, 0, 1),
-            (force_set_point_decrease_button, MIDDLE_COLUMN, SINGLE_COLUMN, 1, 1),
-            (self.test_force_profile_button, R_MIDDLE_COLUMN, TWO_COLUMN, 0, 3),
-            (ttk.Label(exam_setup_frame, text="Current Force (N):"), LEFT_COLUMN, SINGLE_COLUMN, 2, 1),
-            (self.current_force_label, L_MIDDLE_COLUMN, SINGLE_COLUMN, 2, 1),
+            (ttk.Label(exam_setup_frame, text="Current Set-point (N):"), LEFT_COLUMN, SINGLE_COLUMN, 0, DOUBLE_ROW),
+            (self.force_set_point_entry, L_MIDDLE_COLUMN, SINGLE_COLUMN, 0, DOUBLE_ROW),
+            (force_set_point_increase_button, MIDDLE_COLUMN, SINGLE_COLUMN, 0, SINGLE_ROW),
+            (force_set_point_decrease_button, MIDDLE_COLUMN, SINGLE_COLUMN, 1, SINGLE_ROW),
+            (ttk.Button(exam_setup_frame, text="Send", command=self.force_set_point_submit_callback),
+             R_MIDDLE_COLUMN, SINGLE_COLUMN, 0, DOUBLE_ROW),
+            (self.test_force_profile_button, RIGHT_COLUMN, TWO_COLUMN, 0, 3),
+            (ttk.Label(exam_setup_frame, text="Current Force (N):"), LEFT_COLUMN, SINGLE_COLUMN, 2, SINGLE_ROW),
+            (self.current_force_label, L_MIDDLE_COLUMN, SINGLE_COLUMN, 2, SINGLE_ROW),
             (ttk.Label(exam_setup_frame, text="Would you like to\ncrop the raw image?"),
-             LEFT_COLUMN, SINGLE_COLUMN, 3, 1),
+             LEFT_COLUMN, SINGLE_COLUMN, 3, SINGLE_ROW),
             (Radiobutton(exam_setup_frame, text="Yes", variable=self.select_image_crop_variable,
-                         value=1, command=self.select_image_crop_callback), LEFT_COLUMN, SINGLE_COLUMN, 4, 1),
+                         value=1, command=self.select_image_crop_callback), LEFT_COLUMN, SINGLE_COLUMN, 4, SINGLE_ROW),
             (Radiobutton(exam_setup_frame, text="No", variable=self.select_image_crop_variable,
-                         value=0, command=self.select_image_crop_callback), LEFT_COLUMN, SINGLE_COLUMN, 5, 1),
-            (self.generate_new_image_cropping_button, L_MIDDLE_COLUMN, TWO_COLUMN, 4, 2),
-            (self.load_existing_image_cropping_button, R_MIDDLE_COLUMN, TWO_COLUMN, 4, 2)
+                         value=0, command=self.select_image_crop_callback), LEFT_COLUMN, SINGLE_COLUMN, 5, SINGLE_ROW),
+            (self.generate_new_image_cropping_button, L_MIDDLE_COLUMN, TWO_COLUMN, 4, DOUBLE_ROW),
+            (self.load_existing_image_cropping_button, R_MIDDLE_COLUMN, TWO_COLUMN, 4, DOUBLE_ROW),
+            (ttk.Label(exam_setup_frame, text="Set the imaging depth (cm)\nof the US scanner:"),
+             LEFT_COLUMN, SINGLE_COLUMN, 6, SINGLE_ROW),
+            (self.imaging_depth_entry, L_MIDDLE_COLUMN, SINGLE_COLUMN, 6, SINGLE_ROW),
+            (ttk.Button(exam_setup_frame, text="Send", command=self.imaging_depth_submit_callback),
+             MIDDLE_COLUMN, TWO_COLUMN, 6, SINGLE_ROW),
         ]
 
         # endregion
@@ -286,14 +313,16 @@ class UserInterface:
                        text="Identify Thyroid from Template",
                        command=self.identify_thyroid_from_template_button_callback,
                        )
-        self.scan_upwards_button = ttk.Button(thyroid_exam_frame,
-                                              text="Scan Upwards",
-                                              command=self.scan_upwards_button_callback,
-                                              )
-        self.scan_downwards_button = ttk.Button(thyroid_exam_frame,
-                                                text="Scan Downwards",
-                                                command=self.scan_downwards_button_callback,
-                                                )
+        self.scan_positive_button = ttk.Button(thyroid_exam_frame,
+                                               text="Scan Positive",
+                                               command=self.scan_positive_button_callback,
+                                               )
+        self.scan_negative_button = ttk.Button(thyroid_exam_frame,
+                                               text="Scan Negative",
+                                               command=self.scan_negative_button_callback,
+                                               )
+        self.scan_distance_entry = Entry(thyroid_exam_frame, validate=ALL, validatecommand=(validation_command, '%P'))
+        self.scan_distance_entry.insert(0, '6.0')
         self.complete_full_scan_button = ttk.Button(thyroid_exam_frame,
                                                     text="Complete\n Full Scan",
                                                     command=self.complete_full_scan_button_callback,
@@ -305,9 +334,11 @@ class UserInterface:
         self.thyroid_exam_widgets = [
             (self.identify_thyroid_from_points_button, LEFT_COLUMN, TWO_COLUMN, 0, 1),
             (self.identify_thyroid_from_template_button, R_MIDDLE_COLUMN, TWO_COLUMN, 0, 1),
-            (self.scan_upwards_button, LEFT_COLUMN, TWO_COLUMN, 1, 1),
-            (self.scan_downwards_button, LEFT_COLUMN, TWO_COLUMN, 2, 1),
-            (self.complete_full_scan_button, R_MIDDLE_COLUMN, TWO_COLUMN, 1, 2),
+            (self.scan_positive_button, LEFT_COLUMN, TWO_COLUMN, 1, 1),
+            (self.scan_negative_button, LEFT_COLUMN, TWO_COLUMN, 2, 1),
+            (ttk.Label(thyroid_exam_frame, text="Scanning Distance (cm)"), MIDDLE_COLUMN, TWO_COLUMN, 1, 1),
+            (self.scan_distance_entry, MIDDLE_COLUMN, TWO_COLUMN, 2, 1),
+            (self.complete_full_scan_button, RIGHT_COLUMN, SINGLE_COLUMN, 1, 2),
             (ttk.Label(thyroid_exam_frame, text="Would you like to generate a volume?"),
              LEFT_COLUMN, THREE_COLUMN, 3, 1),
             (Radiobutton(thyroid_exam_frame, text="Yes", variable=self.generate_volume_selector_variable,
@@ -343,6 +374,56 @@ class UserInterface:
 
         # endregion
 
+        # List the widgets used to populate the developer window
+        # region
+        self.pid_selector = IntVar()
+        self.p_gain_entry = ttk.Entry(developer_frame, validate=ALL, validatecommand=(validation_command, '%P'))
+        self.p_gain_entry.insert(0, "0.000")
+        self.p_gain_var = StringVar(developer_frame, "0.000")
+        self.i_gain_entry = ttk.Entry(developer_frame, validate=ALL, validatecommand=(validation_command, '%P'))
+        self.i_gain_entry.insert(0, "0.000")
+        self.i_gain_var = StringVar(developer_frame, "0.000")
+        self.d_gain_entry = ttk.Entry(developer_frame, validate=ALL, validatecommand=(validation_command, '%P'))
+        self.d_gain_entry.insert(0, "0.000")
+        self.d_gain_var = StringVar(developer_frame, "0.000")
+
+        developer_widgets = [
+            (ttk.Label(developer_frame, text="Select\nController"), LEFT_COLUMN, SINGLE_COLUMN, 0, DOUBLE_ROW),
+            (Radiobutton(developer_frame, text="x-lin-img", variable=self.pid_selector,
+                         value=0, command=self.pid_controller_selection_callback),
+             L_MIDDLE_COLUMN, SINGLE_COLUMN, 0, SINGLE_ROW,),
+            (Radiobutton(developer_frame, text="y-lin-trj", variable=self.pid_selector,
+                         value=1, command=self.pid_controller_selection_callback),
+             MIDDLE_COLUMN, SINGLE_COLUMN, 0, SINGLE_ROW,),
+            (Radiobutton(developer_frame, text="z-lin-force", variable=self.pid_selector,
+                         value=2, command=self.pid_controller_selection_callback),
+             R_MIDDLE_COLUMN, SINGLE_COLUMN, 0, SINGLE_ROW,),
+            (Radiobutton(developer_frame, text="x-ang-N/A", variable=self.pid_selector,
+                         value=3, command=self.pid_controller_selection_callback),
+             L_MIDDLE_COLUMN, SINGLE_COLUMN, 1, SINGLE_ROW,),
+            (Radiobutton(developer_frame, text="y-ang-img", variable=self.pid_selector,
+                         value=4, command=self.pid_controller_selection_callback),
+             MIDDLE_COLUMN, SINGLE_COLUMN, 1, SINGLE_ROW,),
+            (Radiobutton(developer_frame, text="z-ang-N/A", variable=self.pid_selector,
+                         value=5, command=self.pid_controller_selection_callback),
+             R_MIDDLE_COLUMN, SINGLE_COLUMN, 1, SINGLE_ROW,),
+            (ttk.Label(developer_frame, text="P"), L_MIDDLE_COLUMN, SINGLE_COLUMN, 2, SINGLE_ROW),
+            (ttk.Label(developer_frame, text="I"), MIDDLE_COLUMN, SINGLE_COLUMN, 2, SINGLE_ROW),
+            (ttk.Label(developer_frame, text="D"), R_MIDDLE_COLUMN, SINGLE_COLUMN, 2, SINGLE_ROW),
+            (ttk.Label(developer_frame, text="Current Values:"), LEFT_COLUMN, SINGLE_COLUMN, 3, SINGLE_ROW),
+            (ttk.Label(developer_frame, textvariable=self.p_gain_var), L_MIDDLE_COLUMN, SINGLE_COLUMN, 3, SINGLE_ROW),
+            (ttk.Label(developer_frame, textvariable=self.i_gain_var), MIDDLE_COLUMN, SINGLE_COLUMN, 3, SINGLE_ROW),
+            (ttk.Label(developer_frame, textvariable=self.d_gain_var), R_MIDDLE_COLUMN, SINGLE_COLUMN, 3, SINGLE_ROW),
+            (ttk.Label(developer_frame, text="Set to:"), LEFT_COLUMN, SINGLE_COLUMN, 4, SINGLE_ROW),
+            (self.p_gain_entry, L_MIDDLE_COLUMN, SINGLE_COLUMN, 4, SINGLE_ROW),
+            (self.i_gain_entry, MIDDLE_COLUMN, SINGLE_COLUMN, 4, SINGLE_ROW),
+            (self.d_gain_entry, R_MIDDLE_COLUMN, SINGLE_COLUMN, 4, SINGLE_ROW),
+            (ttk.Button(developer_frame, text="Set Values", command=self.pid_value_setting_callback),
+             RIGHT_COLUMN, SINGLE_COLUMN, 4, SINGLE_ROW),
+        ]
+
+        # endregion
+
         # Add the widgets to each frame
         list_of_list_of_widgets = [
             self.always_visible_frame_widgets,
@@ -350,6 +431,7 @@ class UserInterface:
             self.thyroid_exam_widgets,
             self.nodule_exam_widgets,
             status_logging_widgets,
+            developer_widgets
         ]
         for list_of_widgets in list_of_list_of_widgets:
             self.add_widgets(list_of_widgets)
@@ -375,7 +457,7 @@ class UserInterface:
     # region
 
     @staticmethod
-    def force_set_point_entry_validation(new_entry: str) -> bool:
+    def entry_widget_float_validation(new_entry: str) -> bool:
         """
         Validates any value entered into the force set-point entry field.
 
@@ -395,7 +477,7 @@ class UserInterface:
             # Do not confirm the entry
             return False
 
-    def force_set_point_submit_callback(self, _) -> None:
+    def force_set_point_submit_callback(self) -> None:
         """
         Publishes the set-point entered into the entry field when the Enter key is pressed.
         """
@@ -493,6 +575,16 @@ class UserInterface:
             self.generate_new_image_cropping_button.configure(state=DISABLED)
             self.load_existing_image_cropping_button.configure(state=DISABLED)
 
+    def imaging_depth_submit_callback(self) -> None:
+        """
+        Publishes the set-point entered into the entry field when the Enter key is pressed.
+        """
+
+        # Send force set point value
+        self.imaging_depth_publisher.publish(
+            Float64(round(float(self.imaging_depth_entry.get()), NUM_DIGITS_OF_FORCE_TO_DISPLAY))
+        )
+
     def identify_thyroid_from_points_button_callback(self) -> None:
         """
         Publish the command to generate the grabcut filter mask
@@ -505,17 +597,21 @@ class UserInterface:
         """
         self.identify_thyroid_from_template_command_publisher.publish(Bool(True))
 
-    def scan_upwards_button_callback(self) -> None:
+    def scan_positive_button_callback(self) -> None:
         """
         Publish the command to scan upwards.
         """
-        self.scan_upwards_command_publisher.publish(Bool(True))
+        self.scan_command_publisher.publish(
+            Float64(float(self.scan_distance_entry.get()) / 100)  # convert cm to m
+        )
 
-    def scan_downwards_button_callback(self) -> None:
+    def scan_negative_button_callback(self) -> None:
         """
         Publish the command to scan downwards.
         """
-        self.scan_downwards_command_publisher.publish(Bool(True))
+        self.scan_command_publisher.publish(
+            Float64(-float(self.scan_distance_entry.get()) / 100)  # convert cm to m
+        )
 
     def complete_full_scan_button_callback(self) -> None:
         """
@@ -709,7 +805,22 @@ class UserInterface:
         self.image_filtering_button[WIDGET_STATE] = new_state
         self.force_control_button['state'] = new_state
 
+    def pid_controller_selection_callback(self) -> None:
+        """
+        Publish the pid controller selected on the interface.
+        """
+        self.pid_controller_publisher.publish(UInt8(self.pid_selector.get()))
+
+    def pid_value_setting_callback(self) -> None:
+        """
+        Publish the values selected in the interface
+        """
+        self.p_gain_publisher.publish(Float64(float(self.p_gain_entry.get())))
+        self.i_gain_publisher.publish(Float64(float(self.i_gain_entry.get())))
+        self.d_gain_publisher.publish(Float64(float(self.d_gain_entry.get())))
+
     # endregion
+
     ############################################################################
 
     #############################################################################
@@ -724,10 +835,28 @@ class UserInterface:
         data
             The WrenchStamped message sent by the robot containing the current force experienced by the robot.
         """
-        self.current_force_string_var.set(str(data.wrench.force.z))
+        self.current_force_string_var.set(str(round(data.wrench.force.z, 2)))
 
     def debug_status_messages_callback(self, data: String):
         self.update_status(data.data)
+
+    def p_gain_message_callback(self, data: Float64) -> None:
+        """
+        Set the value of the p gain sent to the node.
+        """
+        self.p_gain_var.set(str(data.data))
+
+    def i_gain_message_callback(self, data: Float64) -> None:
+        """
+        Set the value of the i gain sent to the node.
+        """
+        self.i_gain_var.set(str(data.data))
+
+    def d_gain_message_callback(self, data: Float64) -> None:
+        """
+        Set the value of the d gain sent to the node.
+        """
+        self.d_gain_var.set(str(data.data))
 
     # endregion
     #############################################################################

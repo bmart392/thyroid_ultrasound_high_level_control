@@ -23,6 +23,10 @@
        <include file="$(find thyroid_ultrasound_imaging)/launch/core_nodes.launch"/>
     </group>
     
+    <include file="$(find thyroid_ultrasound_robot_control)/launch/robot_bringup.launch"/>
+    
+    <node name="rqt_gui" pkg="rqt_gui" type="rqt_gui"/>
+    
     
     
 

@@ -16,7 +16,7 @@ from geometry_msgs.msg import WrenchStamped
 from std_msgs.msg import Bool, String, Float64, UInt8
 
 # Import custom ROS packages
-from thyroid_ultrasound_high_level_control.msg import log_message
+from thyroid_ultrasound_messages.msg import log_message
 
 # Define constants used for logging purposes
 VERBOSE: int = int(0)

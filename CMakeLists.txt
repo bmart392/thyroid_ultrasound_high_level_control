@@ -161,6 +161,7 @@ catkin_package(
 ## in contrast to setup.py, you can choose the destination
 catkin_install_python(PROGRAMS
   scripts/UserInterface.py
+  scripts/ControllerTuningGraphsNode.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

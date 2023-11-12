@@ -11,12 +11,12 @@ import tkinter.ttk as ttk
 from argparse import ArgumentParser
 
 # Import ROS packages
-from rospy import init_node, Publisher, Subscriber
 from geometry_msgs.msg import WrenchStamped
 from std_msgs.msg import Bool, String, Float64, UInt8
 
 # Import custom ROS packages
-from thyroid_ultrasound_messages.msg import log_message
+from thyroid_ultrasound_support.BasicNode import *
+from thyroid_ultrasound_support.TopicNames import *
 
 # Define constants used for logging purposes
 VERBOSE: int = int(0)
@@ -67,8 +67,11 @@ TESTING: int = int(0)
 RUNNING: int = int(1)
 
 
-class UserInterface:
+class UserInterface(BasicNode):
     def __init__(self, parent=None):
+
+        # Add a call to the parent class
+        super().__init__()
 
         # Added to ensure TKinter works in the ROS framework
         self.parent = parent
@@ -90,26 +93,23 @@ class UserInterface:
         # Startup the node
         init_node('UserInterface')
 
-        # Create a subscriber to listen to the external force felt by the robot
-        Subscriber('/force_control/sensed_force_cleaned', WrenchStamped, self.robot_sensed_force_callback)
-
-        # Create a subscriber to hear debug messages
-        Subscriber('/system/logging', log_message, self.debug_status_messages_callback)
+        # Define custom shutdown behavior
+        on_shutdown(self.shutdown_node)
 
         # Create subscribers to listen to the PID values from the robot control node
-        self.pid_controller_publisher = Publisher('/tuning/controller', UInt8, queue_size=1)
-        Subscriber('/tuning/current/p_gain', Float64, self.p_gain_message_callback)
-        Subscriber('/tuning/current/i_gain', Float64, self.i_gain_message_callback)
-        Subscriber('/tuning/current/d_gain', Float64, self.d_gain_message_callback)
-        self.p_gain_publisher = Publisher('/tuning/setting/p_gain', Float64, queue_size=1)
-        self.i_gain_publisher = Publisher('/tuning/setting/i_gain', Float64, queue_size=1)
-        self.d_gain_publisher = Publisher('/tuning/setting/d_gain', Float64, queue_size=1)
+        self.pid_controller_publisher = Publisher(CONTROLLER_SELECTOR, UInt8, queue_size=1)
+        Subscriber(P_GAIN_CURRENT, Float64, self.p_gain_message_callback)
+        Subscriber(I_GAIN_CURRENT, Float64, self.i_gain_message_callback)
+        Subscriber(D_GAIN_CURRENT, Float64, self.d_gain_message_callback)
+        self.p_gain_publisher = Publisher(P_GAIN_SETTING, Float64, queue_size=1)
+        self.i_gain_publisher = Publisher(I_GAIN_SETTING, Float64, queue_size=1)
+        self.d_gain_publisher = Publisher(D_GAIN_SETTING, Float64, queue_size=1)
 
         # Create a publisher to publish the command to start and stop filtering images
         self.filter_images_command_publisher = Publisher('/command/filter_images', Bool, queue_size=1)
 
         # Create a publisher to publish the command to use force feedback
-        self.use_force_feedback_command_publisher = Publisher('/command/use_force_feedback', Bool,
+        self.use_force_feedback_command_publisher = Publisher(USE_FORCE_FEEDBACK, Bool,
                                                               queue_size=1)
 
         # Create a publisher to publish the command to start and stop the robot motion
@@ -133,7 +133,7 @@ class UserInterface:
             '/command/generate_threshold_parameters', Bool, queue_size=1)
 
         # Create a publisher to publish the desired force for the robot to exert
-        self.force_set_point_publisher = Publisher('/force_control/set_point', Float64, queue_size=1)
+        self.force_set_point_publisher = Publisher(RC_FORCE_SET_POINT, Float64, queue_size=1)
 
         # Create a publisher to publish the command to start and stop streaming images
         self.image_streaming_command_publisher = Publisher('/command/image_streaming_control', Bool, queue_size=1)
@@ -150,7 +150,7 @@ class UserInterface:
                                                                         Bool, queue_size=1)
 
         # Create a publisher to publish the command to scan upwards
-        self.scan_command_publisher = Publisher('/command/create_trajectory', Float64, queue_size=1)
+        self.scan_command_publisher = Publisher(CREATE_TRAJECTORY, Float64, queue_size=1)
 
         # Create a publisher to publish the command to scan downwards
         # self.scan_downwards_command_publisher = Publisher('/command/scan_downwards', Bool, queue_size=1)
@@ -166,6 +166,12 @@ class UserInterface:
 
         # Create a publisher to publish the imaging depth of the US probe
         self.imaging_depth_publisher = Publisher('/image_data/imaging_depth', Float64, queue_size=1)
+
+        # Create a subscriber to listen to the external force felt by the robot
+        Subscriber(ROBOT_DERIVED_FORCE, WrenchStamped, self.robot_sensed_force_callback)
+
+        # Create a subscriber to hear debug messages
+        Subscriber('/system/logging', log_message, self.debug_status_messages_callback)
 
         # endregion
         # ---------------------------------------
@@ -389,10 +395,10 @@ class UserInterface:
 
         developer_widgets = [
             (ttk.Label(developer_frame, text="Select\nController"), LEFT_COLUMN, SINGLE_COLUMN, 0, DOUBLE_ROW),
-            (Radiobutton(developer_frame, text="x-lin-img", variable=self.pid_selector,
+            (Radiobutton(developer_frame, text="x-lin-trj", variable=self.pid_selector,
                          value=0, command=self.pid_controller_selection_callback),
              L_MIDDLE_COLUMN, SINGLE_COLUMN, 0, SINGLE_ROW,),
-            (Radiobutton(developer_frame, text="y-lin-trj", variable=self.pid_selector,
+            (Radiobutton(developer_frame, text="y-lin-img", variable=self.pid_selector,
                          value=1, command=self.pid_controller_selection_callback),
              MIDDLE_COLUMN, SINGLE_COLUMN, 0, SINGLE_ROW,),
             (Radiobutton(developer_frame, text="z-lin-force", variable=self.pid_selector,
@@ -401,7 +407,7 @@ class UserInterface:
             (Radiobutton(developer_frame, text="x-ang-N/A", variable=self.pid_selector,
                          value=3, command=self.pid_controller_selection_callback),
              L_MIDDLE_COLUMN, SINGLE_COLUMN, 1, SINGLE_ROW,),
-            (Radiobutton(developer_frame, text="y-ang-img", variable=self.pid_selector,
+            (Radiobutton(developer_frame, text="y-ang-N/A", variable=self.pid_selector,
                          value=4, command=self.pid_controller_selection_callback),
              MIDDLE_COLUMN, SINGLE_COLUMN, 1, SINGLE_ROW,),
             (Radiobutton(developer_frame, text="z-ang-N/A", variable=self.pid_selector,
@@ -858,6 +864,13 @@ class UserInterface:
         """
         self.d_gain_var.set(str(data.data))
 
+    def shutdown_node(self):
+        """
+        Define the custom shutdown behavior of the node to close the window.
+        """
+        print("Shutdown signal received.")
+        self.parent.destroy()
+
     # endregion
     #############################################################################
 
@@ -948,9 +961,8 @@ if __name__ == "__main__":
     # Create the control application within the root window
     UserInterface(root)
 
-    print("Close the GUI window to terminate this node.")
+    print("Node initialized.")
+    print("Press ctrl+c to terminate.")
 
     # Run until the window is closed.
     root.mainloop()
-
-    print("Terminating the node.")

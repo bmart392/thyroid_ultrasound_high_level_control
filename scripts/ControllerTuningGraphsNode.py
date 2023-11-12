@@ -1,0 +1,322 @@
+#!/usr/bin/env python3
+
+"""
+File containing ControllerTuningGraphsNode class.
+"""
+
+# Import standard ROS packages
+from std_msgs.msg import Float64
+from geometry_msgs.msg import WrenchStamped, TwistStamped
+
+# Import standard python packages
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from matplotlib.lines import Line2D
+from numpy import floor, ceil
+from rospy import Time
+
+# Import custom ROS packages
+from thyroid_ultrasound_messages.msg import Float64Stamped
+
+# Import custom python packages
+from thyroid_ultrasound_support.BasicNode import *
+from thyroid_ultrasound_support.TopicNames import *
+
+# TODO Test that image position error is accurately showing up
+
+
+class ControllerTuningGraphsNode(BasicNode):
+
+    def __init__(self):
+        # Call the init function of the super class
+        super().__init__()
+
+        # Create the node object
+        init_node("ControllerTuningGraphsNode")
+
+        # Define custom node shutdown behavior
+        on_shutdown(self.shutdown_node)
+
+        # Get the current time to use to offset all other times
+        temp_time = Time.now()
+
+        # Calculate the time stamp as a single float number
+        self.start_time = temp_time.secs + (temp_time.nsecs / 10 ** 9)
+
+        # Define variables to store information for each graph
+        self.latest_pos_x_lin_time = 0.0
+        self.latest_pos_x_lin_data = 0.0
+        self.pos_x_lin_set_point = 0.0
+
+        self.latest_img_y_lin_time = 0.0
+        self.latest_img_y_lin_data = 0.0
+        self.img_y_lin_set_point = 0.0
+
+        self.latest_force_z_lin_time = 0.0
+        self.latest_force_z_lin_data = 0.0
+        self.force_z_lin_set_point = 0.0
+
+        self.latest_force_x_ang_time = 0.0
+        self.latest_force_x_ang_data = 0.0
+        self.force_x_ang_set_point = 0.0
+
+        # Define subscribers for each value that needs to be monitored
+        Subscriber(ROBOT_DERIVED_FORCE, WrenchStamped, self.robot_force_callback)
+        Subscriber(RC_FORCE_SET_POINT, Float64, self.robot_force_set_point_callback)
+        Subscriber(RC_POSITION_ERROR, Float64Stamped, self.position_error_callback)
+        Subscriber(RC_IMAGE_ERROR, TwistStamped)
+
+        # Create the figure used for showing the plots
+        self.fig, ax = plt.subplots(2, 2)
+
+        # Add a title to the window
+        self.fig.canvas.manager.set_window_title("PID Controller Graphs")
+
+        # Create individual graph objects for monitoring each controller
+        self.pos_x_lin_monitor = ControllerMonitor(ax[0][0], y_axis_limits=(-0.025, 0.025),
+                                                   y_axis_limit_multiples=(0.005, 0.005),
+                                                   title="Position - X Linear", y_label="Position Error (m)",
+                                                   x_label="Time (s)")
+
+        self.img_y_lin_monitor = ControllerMonitor(ax[0][1], y_axis_limits=(-0.025, 0.025),
+                                                   y_axis_limit_multiples=(0.005, 0.005),
+                                                   title="Image - Y Linear", y_label="Position Error (m)",
+                                                   x_label="Time (s)")
+
+        self.force_z_lin_monitor = ControllerMonitor(ax[1][0], y_axis_limits=(-0.5, 10),
+                                                     y_axis_limit_multiples=(0.5, 5),
+                                                     title="Force - Z Linear",
+                                                     y_label="Force (N)", x_label="Time (s)")
+
+        self.force_x_ang_monitor = ControllerMonitor(ax[1][1], y_axis_limits=(-1., 1),
+                                                     y_axis_limit_multiples=(0.25, 0.25),
+                                                     title="Force - Z Angular",
+                                                     y_label="Torque (N*m)", x_label="Time (s)")
+
+        # Create animations for each graph object
+        animation.FuncAnimation(self.fig, self.pos_x_lin_monitor.update, self.get_latest_pos_x_lin_values, interval=50,
+                                blit=True, save_count=100)
+
+        animation.FuncAnimation(self.fig, self.img_y_lin_monitor.update, self.get_latest_img_y_lin_values, interval=50,
+                                blit=True, save_count=100)
+
+        animation.FuncAnimation(self.fig, self.force_z_lin_monitor.update, self.get_latest_force_z_lin_values,
+                                interval=50,
+                                blit=True, save_count=100)
+
+        animation.FuncAnimation(self.fig, self.force_x_ang_monitor.update, self.get_latest_force_x_ang_values,
+                                interval=50,
+                                blit=True, save_count=100)
+
+        # Show the plot
+        plt.show()
+
+    def position_error_callback(self, msg: Float64Stamped):
+        self.latest_pos_x_lin_time = (msg.header.stamp.secs + (msg.header.stamp.nsecs / 10 ** 9)) - self.start_time
+        self.latest_pos_x_lin_data = msg.data.data
+
+    def image_error_callback(self, data: TwistStamped):
+        self.latest_img_y_lin_time = (data.header.stamp.secs + (data.header.stamp.nsecs / 10 ** 9)) - self.start_time
+        self.latest_img_y_lin_data = data.twist.linear.x
+
+    def robot_force_callback(self, data: WrenchStamped):
+        self.latest_force_z_lin_time = (data.header.stamp.secs + (data.header.stamp.nsecs / 10 ** 9)) - self.start_time
+        self.latest_force_z_lin_data = data.wrench.force.z
+
+        self.latest_force_x_ang_time = self.latest_force_z_lin_time
+        self.latest_force_x_ang_data = data.wrench.torque.x
+
+    def robot_force_set_point_callback(self, data: Float64):
+        self.force_z_lin_set_point = data.data
+
+    def get_latest_pos_x_lin_values(self):
+        yield self.latest_pos_x_lin_time, self.latest_pos_x_lin_data, self.pos_x_lin_set_point
+
+    def get_latest_img_y_lin_values(self):
+        yield self.latest_img_y_lin_time, self.latest_img_y_lin_data, self.img_y_lin_set_point
+
+    def get_latest_force_z_lin_values(self):
+        yield self.latest_force_z_lin_time, self.latest_force_z_lin_data, self.force_z_lin_set_point
+
+    def get_latest_force_x_ang_values(self):
+        yield self.latest_force_x_ang_time, self.latest_force_x_ang_data, self.force_x_ang_set_point
+
+    def shutdown_node(self):
+        """
+        Define the custom shutdown behavior of the node to close the window.
+        """
+        print("Shutdown signal received.")
+        plt.close(self.fig)
+
+
+class ControllerMonitor:
+    def __init__(self, ax, y_axis_limits: tuple = (0, 2), y_axis_limit_multiples: tuple = (0.5, 0.5),
+                 title: str = None, x_label: str = None, y_label: str = None):
+
+        # Save the axis being used for this controller
+        self.ax = ax
+
+        # Set the appearance of the subplot
+        if title is not None:
+            self.ax.set_title(title)
+        if x_label is not None:
+            self.ax.set_xlabel(x_label)
+        if y_label is not None:
+            self.ax.set_ylabel(y_label)
+
+        # Define variables to store data to be plotted
+        self.time_data = [0]
+        self.set_point_data = [0]
+        self.actual_value_data = [0]
+
+        # Define lines that will be plotted
+        self.set_point_line = Line2D(self.time_data, self.set_point_data, color='r')
+        self.actual_value_line = Line2D(self.time_data, self.actual_value_data, color='g')
+
+        # Add the lines to the plot
+        self.ax.add_line(self.set_point_line)
+        self.ax.add_line(self.actual_value_line)
+
+        # Define the forward and backwards limits of the time axis
+        self.prior_time_shown = 5  # seconds
+        self.future_time_shown = 5  # seconds
+
+        # Calculate the max age of the data allowed to be saved
+        self.max_age_of_data = self.prior_time_shown + self.future_time_shown - 1  # seconds
+
+        # Save the x and y limits of the graph
+        self.x_limits = (-self.prior_time_shown, self.future_time_shown)
+        self.y_limits = (y_axis_limits[0], y_axis_limits[1])
+        self.y_limit_lower_multiple = y_axis_limit_multiples[0]
+        self.y_limit_upper_multiple = y_axis_limit_multiples[1]
+
+        # Set the limits of the plot
+        self.ax.set_xlim(self.x_limits)
+        self.ax.set_ylim(self.y_limits[0], self.y_limits[1])
+
+    def update(self, data):
+        """
+        The function called to update the graph at each data point.
+        """
+
+        # Rename the data passed in for clarity
+        new_time = data[0]
+        new_actual_value = data[1]
+        new_set_point_value = data[2]
+
+        # Add the new data to each data set
+        self.time_data.append(new_time)
+        self.set_point_data.append(new_set_point_value)
+        self.actual_value_data.append(new_actual_value)
+
+        # Calculate the oldest any data is allowed to be within the saved data set
+        oldest_allowed_data_age = self.time_data[-1] - self.max_age_of_data
+
+        # Note the index at which the data stops being too old
+        removal_index = 0
+
+        # Go through the time data set to determine where data stops being too old
+        for time in self.time_data:
+            if time >= oldest_allowed_data_age:
+                break
+            removal_index = removal_index + 1
+
+        # Remove any data which is too old
+        self.time_data = self.time_data[removal_index::]
+        self.set_point_data = self.set_point_data[removal_index::]
+        self.actual_value_data = self.actual_value_data[removal_index::]
+
+        # Create a variable to save a new upper limit if it is needed
+        new_upper_limit = None
+
+        # Find the largest data value in the data set
+        actual_data_upper_limit = max(self.actual_value_data)
+
+        # If the largest data value is bigger than the current upper y limit
+        if actual_data_upper_limit > self.y_limits[1] - self.y_limit_upper_multiple:
+            # Save the new upper limit
+            new_upper_limit = actual_data_upper_limit
+
+        # Find the largest data value in the set point data set
+        set_point_upper_limit = max(self.set_point_data)
+
+        # If the largest set point data is bigger than the current upper y limit
+        if set_point_upper_limit > self.y_limits[1] - self.y_limit_upper_multiple:
+
+            # If the set point upper limit is also bigger than the largest actual data value
+            if set_point_upper_limit > actual_data_upper_limit:
+                # Save the new upper limit
+                new_upper_limit = set_point_upper_limit
+
+        # Create a variable to save a new lower limit if it is needed
+        new_lower_limit = None
+
+        # Find the lowest data value in the data set
+        actual_data_lower_limit = min(self.actual_value_data)
+
+        # If the lowest data value is lower than the current lower y limit
+        if actual_data_lower_limit < self.y_limits[0] + self.y_limit_lower_multiple:
+            # Save the new lower limit
+            new_lower_limit = actual_data_lower_limit
+
+        # Find the lowest data value in the set point data set
+        set_point_lower_limit = min(self.set_point_data)
+
+        # If the lowest set point data is lower than the current lower y limit
+        if set_point_lower_limit < self.y_limits[0] + self.y_limit_lower_multiple:
+
+            # If the set point lower limit is also lower than the lowest actual data value
+            if set_point_lower_limit < actual_data_lower_limit:
+                # Save the new lower limit
+                new_lower_limit = set_point_lower_limit
+
+        # Define a flag to see if either y limit has been changed
+        y_limit_changed = False
+
+        # If a new upper limit has been calculated
+        if new_upper_limit is not None:
+            # Calculate and save the new upper y limit
+            self.y_limits = (self.y_limits[0],
+                             self.y_limit_upper_multiple * (1 + ceil(new_upper_limit / self.y_limit_upper_multiple)))
+
+            # Note that the y limits have changed
+            y_limit_changed = True
+
+        # If a new lower limit has been calculated
+        if new_lower_limit is not None:
+            # Calculate and save the new lower y limit
+            self.y_limits = (self.y_limit_lower_multiple * (-1 + floor(new_lower_limit / self.y_limit_lower_multiple)),
+                             self.y_limits[1])
+
+            # Note that the y limits have changed
+            y_limit_changed = True
+
+        # If the y limits have changed
+        if y_limit_changed:
+            # Change the y limits on the graph
+            self.ax.set_ylim(self.y_limits[0], self.y_limits[1])
+
+        # Check to see if the time axis of the graph needs to be updated
+        if self.time_data[-1] >= self.x_limits[1] - 1:
+            # Calculate and save the new time axis limits
+            self.x_limits = (self.time_data[-1] - self.prior_time_shown, self.time_data[-1] + self.future_time_shown)
+
+            # Set the x limits on the graph
+            self.ax.set_xlim(self.x_limits)
+
+            # Redraw the graph
+            self.ax.figure.canvas.draw()
+
+        # Add the new data to the set point and actual data lines
+        self.set_point_line.set_data(self.time_data, self.set_point_data)
+        self.actual_value_line.set_data(self.time_data, self.actual_value_data)
+
+        # Return each line
+        return self.set_point_line, self.actual_value_line
+
+
+if __name__ == "__main__":
+    print("Node initialized.")
+    print("Press ctrl+c to terminate.")
+
+    node = ControllerTuningGraphsNode()

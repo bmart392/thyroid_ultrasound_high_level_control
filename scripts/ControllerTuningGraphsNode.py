@@ -5,7 +5,6 @@ File containing ControllerTuningGraphsNode class.
 """
 
 # Import standard ROS packages
-from std_msgs.msg import Float64
 from geometry_msgs.msg import WrenchStamped, TwistStamped
 
 # Import standard python packages
@@ -13,7 +12,6 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.lines import Line2D
 from numpy import floor, ceil
-from rospy import Time
 
 # Import custom ROS packages
 from thyroid_ultrasound_messages.msg import Float64Stamped
@@ -21,8 +19,6 @@ from thyroid_ultrasound_messages.msg import Float64Stamped
 # Import custom python packages
 from thyroid_ultrasound_support.BasicNode import *
 from thyroid_ultrasound_support.TopicNames import *
-
-# TODO Test that image position error is accurately showing up
 
 
 class ControllerTuningGraphsNode(BasicNode):
@@ -60,11 +56,16 @@ class ControllerTuningGraphsNode(BasicNode):
         self.latest_force_x_ang_data = 0.0
         self.force_x_ang_set_point = 0.0
 
+        self.latest_img_x_ang_time = 0.0
+        self.latest_img_x_ang_data = 0.0
+        self.img_x_ang_set_point = 0.0
+
         # Define subscribers for each value that needs to be monitored
         Subscriber(ROBOT_DERIVED_FORCE, WrenchStamped, self.robot_force_callback)
         Subscriber(RC_FORCE_SET_POINT, Float64, self.robot_force_set_point_callback)
         Subscriber(RC_POSITION_ERROR, Float64Stamped, self.position_error_callback)
-        Subscriber(RC_IMAGE_ERROR, TwistStamped)
+        Subscriber(RC_IMAGE_ERROR, TwistStamped, self.image_error_callback)
+        Subscriber(RC_PATIENT_CONTACT_ERROR, Float64Stamped, self.patient_contact_callback)
 
         # Create the figure used for showing the plots
         self.fig, ax = plt.subplots(2, 2)
@@ -84,27 +85,29 @@ class ControllerTuningGraphsNode(BasicNode):
                                                    x_label="Time (s)")
 
         self.force_z_lin_monitor = ControllerMonitor(ax[1][0], y_axis_limits=(-0.5, 10),
-                                                     y_axis_limit_multiples=(0.5, 5),
+                                                     y_axis_limit_multiples=(2.5, 2.5),
                                                      title="Force - Z Linear",
                                                      y_label="Force (N)", x_label="Time (s)")
 
-        self.force_x_ang_monitor = ControllerMonitor(ax[1][1], y_axis_limits=(-1., 1),
-                                                     y_axis_limit_multiples=(0.25, 0.25),
-                                                     title="Force - Z Angular",
-                                                     y_label="Torque (N*m)", x_label="Time (s)")
+        self.img_x_ang_monitor = ControllerMonitor(ax[1][1], y_axis_limits=(-1., 1),
+                                                   y_axis_limit_multiples=(1., 1.),
+                                                   title="Img - X Angular",
+                                                   y_label="Position Error (m)", x_label="Time (s)")
 
         # Create animations for each graph object
-        animation.FuncAnimation(self.fig, self.pos_x_lin_monitor.update, self.get_latest_pos_x_lin_values, interval=50,
+        animation.FuncAnimation(self.fig, self.pos_x_lin_monitor.update, self.get_latest_pos_x_lin_values,
+                                interval=50,
                                 blit=True, save_count=100)
 
-        animation.FuncAnimation(self.fig, self.img_y_lin_monitor.update, self.get_latest_img_y_lin_values, interval=50,
+        animation.FuncAnimation(self.fig, self.img_y_lin_monitor.update, self.get_latest_img_y_lin_values,
+                                interval=50,
                                 blit=True, save_count=100)
 
         animation.FuncAnimation(self.fig, self.force_z_lin_monitor.update, self.get_latest_force_z_lin_values,
                                 interval=50,
                                 blit=True, save_count=100)
 
-        animation.FuncAnimation(self.fig, self.force_x_ang_monitor.update, self.get_latest_force_x_ang_values,
+        animation.FuncAnimation(self.fig, self.img_x_ang_monitor.update, self.get_latest_img_x_ang_values,
                                 interval=50,
                                 blit=True, save_count=100)
 
@@ -126,6 +129,10 @@ class ControllerTuningGraphsNode(BasicNode):
         self.latest_force_x_ang_time = self.latest_force_z_lin_time
         self.latest_force_x_ang_data = data.wrench.torque.x
 
+    def patient_contact_callback(self, msg: Float64Stamped):
+        self.latest_img_x_ang_time = (msg.header.stamp.secs + (msg.header.stamp.nsecs / 10 ** 9)) - self.start_time
+        self.latest_img_x_ang_data = msg.data.data
+
     def robot_force_set_point_callback(self, data: Float64):
         self.force_z_lin_set_point = data.data
 
@@ -140,6 +147,9 @@ class ControllerTuningGraphsNode(BasicNode):
 
     def get_latest_force_x_ang_values(self):
         yield self.latest_force_x_ang_time, self.latest_force_x_ang_data, self.force_x_ang_set_point
+
+    def get_latest_img_x_ang_values(self):
+        yield self.latest_img_x_ang_time, self.latest_img_x_ang_data, self.img_x_ang_set_point
 
     def shutdown_node(self):
         """
@@ -227,13 +237,14 @@ class ControllerMonitor:
         self.actual_value_data = self.actual_value_data[removal_index::]
 
         # Create a variable to save a new upper limit if it is needed
-        new_upper_limit = None
+        new_upper_limit = (0.5 + ceil(max([max(self.actual_value_data), max(self.set_point_data)]) /
+                                      self.y_limit_upper_multiple)) * self.y_limit_upper_multiple
 
-        # Find the largest data value in the data set
+        """# Find the largest data value in the data set
         actual_data_upper_limit = max(self.actual_value_data)
 
         # If the largest data value is bigger than the current upper y limit
-        if actual_data_upper_limit > self.y_limits[1] - self.y_limit_upper_multiple:
+        if abs(actual_data_upper_limit - self.y_limits[1]) > self.y_limit_upper_multiple:
             # Save the new upper limit
             new_upper_limit = actual_data_upper_limit
 
@@ -241,21 +252,24 @@ class ControllerMonitor:
         set_point_upper_limit = max(self.set_point_data)
 
         # If the largest set point data is bigger than the current upper y limit
-        if set_point_upper_limit > self.y_limits[1] - self.y_limit_upper_multiple:
+        if abs(set_point_upper_limit - self.y_limits[1]) > self.y_limit_upper_multiple:
 
             # If the set point upper limit is also bigger than the largest actual data value
             if set_point_upper_limit > actual_data_upper_limit:
                 # Save the new upper limit
-                new_upper_limit = set_point_upper_limit
+                new_upper_limit = set_point_upper_limit"""
+
+        # TODO Fix the updating of these limits
 
         # Create a variable to save a new lower limit if it is needed
-        new_lower_limit = None
+        new_lower_limit = (-0.5 + floor(min([min(self.actual_value_data), min(self.set_point_data)]) /
+                                        self.y_limit_lower_multiple)) * self.y_limit_lower_multiple
 
-        # Find the lowest data value in the data set
+        """# Find the lowest data value in the data set
         actual_data_lower_limit = min(self.actual_value_data)
 
         # If the lowest data value is lower than the current lower y limit
-        if actual_data_lower_limit < self.y_limits[0] + self.y_limit_lower_multiple:
+        if abs(actual_data_lower_limit - self.y_limits[0]) > self.y_limit_lower_multiple:
             # Save the new lower limit
             new_lower_limit = actual_data_lower_limit
 
@@ -263,30 +277,28 @@ class ControllerMonitor:
         set_point_lower_limit = min(self.set_point_data)
 
         # If the lowest set point data is lower than the current lower y limit
-        if set_point_lower_limit < self.y_limits[0] + self.y_limit_lower_multiple:
+        if abs(set_point_lower_limit - self.y_limits[0]) > self.y_limit_lower_multiple:
 
             # If the set point lower limit is also lower than the lowest actual data value
             if set_point_lower_limit < actual_data_lower_limit:
                 # Save the new lower limit
-                new_lower_limit = set_point_lower_limit
+                new_lower_limit = set_point_lower_limit"""
 
         # Define a flag to see if either y limit has been changed
         y_limit_changed = False
 
         # If a new upper limit has been calculated
-        if new_upper_limit is not None:
+        if not new_upper_limit == self.y_limits[1]:
             # Calculate and save the new upper y limit
-            self.y_limits = (self.y_limits[0],
-                             self.y_limit_upper_multiple * (1 + ceil(new_upper_limit / self.y_limit_upper_multiple)))
+            self.y_limits = (self.y_limits[0], new_upper_limit)
 
             # Note that the y limits have changed
             y_limit_changed = True
 
         # If a new lower limit has been calculated
-        if new_lower_limit is not None:
+        if not new_lower_limit == self.y_limits[0]:
             # Calculate and save the new lower y limit
-            self.y_limits = (self.y_limit_lower_multiple * (-1 + floor(new_lower_limit / self.y_limit_lower_multiple)),
-                             self.y_limits[1])
+            self.y_limits = (new_lower_limit, self.y_limits[1])
 
             # Note that the y limits have changed
             y_limit_changed = True

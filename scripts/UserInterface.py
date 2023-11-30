@@ -4,15 +4,17 @@
 File containing UserInterface class.
 """
 
+
 # Import standard packages
 from tkinter import *
 from tkinter.scrolledtext import ScrolledText
+from tkinter.filedialog import askdirectory
 import tkinter.ttk as ttk
 from argparse import ArgumentParser
 
 # Import ROS packages
 from geometry_msgs.msg import WrenchStamped
-from std_msgs.msg import Bool, String, Float64, UInt8
+from std_msgs.msg import String, UInt8
 
 # Import custom ROS packages
 from thyroid_ultrasound_support.BasicNode import *
@@ -37,6 +39,8 @@ ENABLE_ROBOT_MOVEMENT: str = "ENABLE Robot Movement"
 DISABLE_ROBOT_MOVEMENT: str = "DISABLE Robot Movement"
 TEST_FORCE_CONTROL: str = "Test Force\n Profile"
 STOP_TEST_FORCE_CONTROL: str = "Stop Testing\n Force Control"
+START_SAVING_IMAGES: str = "Start Saving Images"
+STOP_SAVING_IMAGES: str = "Stop Saving Images"
 
 # Define constants for parameters of widgets
 WIDGET_TEXT: str = 'text'
@@ -106,7 +110,7 @@ class UserInterface(BasicNode):
         self.d_gain_publisher = Publisher(D_GAIN_SETTING, Float64, queue_size=1)
 
         # Create a publisher to publish the command to start and stop filtering images
-        self.filter_images_command_publisher = Publisher('/command/filter_images', Bool, queue_size=1)
+        self.filter_images_command_publisher = Publisher(FILTER_IMAGES, Bool, queue_size=1)
 
         # Create a publisher to publish the command to use force feedback
         self.use_force_feedback_command_publisher = Publisher(USE_FORCE_FEEDBACK, Bool,
@@ -116,62 +120,66 @@ class UserInterface(BasicNode):
         self.stop_robot_motion_command_publisher = Publisher('/command/stop_motion', Bool, queue_size=1)
 
         # Create a publisher to publish the command to generate a new image cropping
-        self.generate_new_image_cropping_command_publisher = Publisher('/command/generate_new_image_cropping', Bool,
+        self.generate_new_image_cropping_command_publisher = Publisher(CROP_IMAGE_FROM_POINTS, Bool,
                                                                        queue_size=1)
 
         # Create a publisher to publish the command to identify the thyroid with points
-        self.identify_thyroid_from_points_command_publisher = Publisher('/command/identify_thyroid_from_points', Bool,
+        self.identify_thyroid_from_points_command_publisher = Publisher(IDENTIFY_THYROID_FROM_POINTS, Bool,
                                                                         queue_size=1)
 
         # Create a publisher to publish the command to use a template to identify the thyroid with a template
-        self.identify_thyroid_from_template_command_publisher = Publisher('/command/identify_thyroid_from_template',
+        self.identify_thyroid_from_template_command_publisher = Publisher(IDENTIFY_THYROID_FROM_TEMPLATE,
                                                                           Bool, queue_size=1)
 
         # Create a publisher to publish the command to have the user generate the threshold parameters of the
         # thresholding filter
         self.generate_threshold_filter_parameters_command_publisher = Publisher(
-            '/command/generate_threshold_parameters', Bool, queue_size=1)
+            GENERATE_THRESHOLD_PARAMETERS, Bool, queue_size=1)
 
         # Create a publisher to publish the desired force for the robot to exert
         self.force_set_point_publisher = Publisher(RC_FORCE_SET_POINT, Float64, queue_size=1)
 
         # Create a publisher to publish the command to start and stop streaming images
-        self.image_streaming_command_publisher = Publisher('/command/image_streaming_control', Bool, queue_size=1)
+        self.image_streaming_command_publisher = Publisher(IMAGE_STREAMING_CONTROL, Bool, queue_size=1)
 
         # Create a publisher to publish the command to start and stop streaming images
-        self.restart_image_streaming_command_publisher = Publisher('/command/restart_image_streaming', Bool,
+        self.restart_image_streaming_command_publisher = Publisher(IMAGE_STREAMING_RESTART, Bool,
                                                                    queue_size=1)
 
         # Create a publisher to publish the command to test the force profile
         self.test_force_profile_publisher = Publisher('/command/test_force_profile', Bool, queue_size=1)
 
         # Create a publisher to publish the command to load image crop coordinates from a file
-        self.load_existing_image_cropping_command_publisher = Publisher('/command/load_existing_image_cropping',
+        self.load_existing_image_cropping_command_publisher = Publisher(CROP_IMAGE_FROM_TEMPLATE,
                                                                         Bool, queue_size=1)
 
         # Create a publisher to publish the command to scan upwards
         self.scan_command_publisher = Publisher(CREATE_TRAJECTORY, Float64, queue_size=1)
 
-        # Create a publisher to publish the command to scan downwards
-        # self.scan_downwards_command_publisher = Publisher('/command/scan_downwards', Bool, queue_size=1)
-
         # Create a publisher to publish the command to complete a full scan
-        self.complete_full_scan_command_publisher = Publisher('/command/complete_full_scan', Bool, queue_size=1)
+        self.complete_full_scan_command_publisher = Publisher(COMPLETE_FULL_SCAN, Bool, queue_size=1)
 
         # Create a publisher to publish the command to generate a volume
-        self.generate_volume_command_publisher = Publisher('/command/generate_volume', Bool, queue_size=1)
+        self.generate_volume_command_publisher = Publisher(GENERATE_VOLUME, Bool, queue_size=1)
 
         # Create a publisher to publish the command to display the generated volume
-        self.display_volume_command_publisher = Publisher('/command/display_volume', Bool, queue_size=1)
+        self.display_volume_command_publisher = Publisher(DISPLAY_VOLUME, Bool, queue_size=1)
 
         # Create a publisher to publish the imaging depth of the US probe
-        self.imaging_depth_publisher = Publisher('/image_data/imaging_depth', Float64, queue_size=1)
+        self.imaging_depth_publisher = Publisher(IMAGE_DEPTH, Float64, queue_size=1)
+
+        # Create a publisher to publish the command to use pose feedback
+        self.use_pose_feedback_command_publisher = Publisher(USE_POSE_FEEDBACK, Bool, queue_size=1)
+
+        self.send_image_saving_command_publisher = Publisher(SAVE_IMAGES, Bool, queue_size=1)
+
+        self.send_folder_destination_publisher = Publisher(SAVED_IMAGES_DESTINATION, String, queue_size=1)
 
         # Create a subscriber to listen to the external force felt by the robot
         Subscriber(ROBOT_DERIVED_FORCE, WrenchStamped, self.robot_sensed_force_callback)
 
         # Create a subscriber to hear debug messages
-        Subscriber('/system/logging', log_message, self.debug_status_messages_callback)
+        Subscriber(LOGGING, log_message, self.debug_status_messages_callback)
 
         # endregion
         # ---------------------------------------
@@ -182,8 +190,8 @@ class UserInterface(BasicNode):
 
         # Define parameters used in the logic of the GUI
         self.currently_filtering = False
-        self.currently_force_controlling = False
-        self.currently_robot_moving = False
+        self.currently_using_force_feedback = False
+        self.currently_using_pose_feedback = False
 
         # Set the title of the window
         self.parent.title("User Interface")
@@ -392,6 +400,11 @@ class UserInterface(BasicNode):
         self.d_gain_entry = ttk.Entry(developer_frame, validate=ALL, validatecommand=(validation_command, '%P'))
         self.d_gain_entry.insert(0, "0.000")
         self.d_gain_var = StringVar(developer_frame, "0.000")
+        self.save_images_button = ttk.Button(developer_frame, text=START_SAVING_IMAGES,
+                                             command=self.send_image_saving_command_callback)
+        self.select_image_destination_directory = ttk.Button(developer_frame,
+                                                             text='Select Location of Saved Images',
+                                                             command=self.send_save_images_destination)
 
         developer_widgets = [
             (ttk.Label(developer_frame, text="Select\nController"), LEFT_COLUMN, SINGLE_COLUMN, 0, DOUBLE_ROW),
@@ -426,6 +439,8 @@ class UserInterface(BasicNode):
             (self.d_gain_entry, R_MIDDLE_COLUMN, SINGLE_COLUMN, 4, SINGLE_ROW),
             (ttk.Button(developer_frame, text="Set Values", command=self.pid_value_setting_callback),
              RIGHT_COLUMN, SINGLE_COLUMN, 4, SINGLE_ROW),
+            (self.select_image_destination_directory, L_MIDDLE_COLUMN, THREE_COLUMN, 5, SINGLE_ROW),
+            (self.save_images_button, MIDDLE_COLUMN, SINGLE_COLUMN, 6, SINGLE_ROW),
         ]
 
         # endregion
@@ -722,26 +737,23 @@ class UserInterface(BasicNode):
         # If the button currently says "Start"
         if button_text == START_FORCE_CONTROL:
 
-            # Publish the command to start using force feedback
-            self.use_force_feedback_command_publisher.publish(Bool(True))
-
             # Set it to say "Stop"
             new_button_text = STOP_FORCE_CONTROL
 
             # Set the state to be that the robot is currently using force feedback
-            self.currently_force_controlling = True
+            self.currently_using_force_feedback = True
 
         # If the button currently says "Stop"
         else:
-
-            # Publish the command to stop using force feedback
-            self.use_force_feedback_command_publisher.publish(Bool(False))
 
             # Set it to say "Start"
             new_button_text = START_FORCE_CONTROL
 
             # Set the state to be that the robot is not currently using force_feedback
-            self.currently_force_controlling = False
+            self.currently_using_force_feedback = False
+
+        # Publish the command to stop using force feedback
+        self.use_force_feedback_command_publisher.publish(Bool(self.currently_using_force_feedback))
 
         # Set the new text of the button
         self.force_control_button[WIDGET_TEXT] = new_button_text
@@ -764,7 +776,7 @@ class UserInterface(BasicNode):
             new_button_text = DISABLE_ROBOT_MOVEMENT
 
             # Set the state to be that the robot is currently moving
-            self.currently_robot_moving = True
+            self.currently_using_pose_feedback = True
 
         # If the button currently says "Stop"
         else:
@@ -773,7 +785,10 @@ class UserInterface(BasicNode):
             new_button_text = ENABLE_ROBOT_MOVEMENT
 
             # Set the state to be that the robot is currently not moving
-            self.currently_robot_moving = False
+            self.currently_using_pose_feedback = False
+
+        # Publish the command to use pose feedback based on the button state
+        self.use_pose_feedback_command_publisher.publish(Bool(self.currently_using_pose_feedback))
 
         # Set the new text of the button
         self.allow_robot_movement_button[WIDGET_TEXT] = new_button_text
@@ -787,7 +802,7 @@ class UserInterface(BasicNode):
         """
 
         # If image filtering and force feedback are both on, allow the button to be clicked
-        if self.currently_filtering and self.currently_force_controlling:
+        if self.currently_filtering and self.currently_using_force_feedback:
             self.allow_robot_movement_button[WIDGET_STATE] = NORMAL
 
         # Otherwise, disable it
@@ -800,7 +815,7 @@ class UserInterface(BasicNode):
         """
 
         # If the robot is currently moving, disable the image filtering and force control buttons
-        if self.currently_robot_moving:
+        if self.currently_using_pose_feedback:
             new_state = DISABLED
 
         # If the robot is not currently moving, enable the image filtering and force control buttons
@@ -825,8 +840,23 @@ class UserInterface(BasicNode):
         self.i_gain_publisher.publish(Float64(float(self.i_gain_entry.get())))
         self.d_gain_publisher.publish(Float64(float(self.d_gain_entry.get())))
 
-    # endregion
+    def send_image_saving_command_callback(self) -> None:
 
+        if self.save_images_button.cget(WIDGET_TEXT) == START_SAVING_IMAGES:
+            self.send_image_saving_command_publisher.publish(Bool(True))
+            self.save_images_button.configure(text=STOP_SAVING_IMAGES)
+        elif self.save_images_button.cget(WIDGET_TEXT) == STOP_SAVING_IMAGES:
+            self.send_image_saving_command_publisher.publish(Bool(False))
+            self.save_images_button.configure(text=START_SAVING_IMAGES)
+        else:
+            raise Exception("Something very strange has happened here.")
+
+    def send_save_images_destination(self) -> None:
+        self.send_folder_destination_publisher.publish(askdirectory(initialdir='/home/ben',
+                                                                    title="Select destination for saved images."))
+
+
+    # endregion
     ############################################################################
 
     #############################################################################
@@ -868,7 +898,7 @@ class UserInterface(BasicNode):
         """
         Define the custom shutdown behavior of the node to close the window.
         """
-        print("Shutdown signal received.")
+        print("\nShutdown signal received.")
         self.parent.destroy()
 
     # endregion
@@ -953,16 +983,31 @@ class UserInterface(BasicNode):
     # endregion
     #############################################################################
 
+    def publishing_loop(self):
+        """
+        Publishes the different commands at regular intervals.
+        """
+        self.filter_images_command_publisher.publish(Bool(self.currently_filtering))
+        self.use_force_feedback_command_publisher.publish(Bool(self.currently_using_force_feedback))
+        self.use_pose_feedback_command_publisher.publish(Bool(self.currently_using_pose_feedback))
+        root.after(100, self.publishing_loop)
+
 
 if __name__ == "__main__":
     # Create a root window
     root = Tk()
 
     # Create the control application within the root window
-    UserInterface(root)
+    node = UserInterface(root)
 
     print("Node initialized.")
     print("Press ctrl+c to terminate.")
+
+    # Define the publishing rate
+    publishing_rate = 10  # hz
+
+    # Run the publishing loop in the background alongside the TKinter main loop
+    root.after(round(1000/publishing_rate), node.publishing_loop)
 
     # Run until the window is closed.
     root.mainloop()

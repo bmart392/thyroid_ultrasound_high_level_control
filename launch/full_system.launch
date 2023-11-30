@@ -5,6 +5,7 @@
     
     <!-- define the arguement to the launch file -->
     <arg name="testing_mode" default="false"/>
+    <arg name="include_robot" default="true"/>
     
     
     <group if="$(arg testing_mode)">
@@ -20,12 +21,18 @@
        <!-- start the experiment controller -->
        <node name="UserInterface" pkg="thyroid_ultrasound_high_level_control" type="UserInterface.py"/>
        
-       <include file="$(find thyroid_ultrasound_imaging)/launch/core_nodes.launch"/>
+       <include file="$(find thyroid_ultrasound_imaging)/launch/real_data.launch"/>
     </group>
     
-    <include file="$(find thyroid_ultrasound_robot_control)/launch/robot_bringup.launch"/>
+    <group if="$(arg include_robot)">
+    
+    	<include file="$(find thyroid_ultrasound_robot_control)/launch/robot_bringup.launch"/>
+    
+    </group>
     
     <node name="rqt_gui" pkg="rqt_gui" type="rqt_gui"/>
+    
+    <node name="ControllerTuningGraphsNode" pkg="thyroid_ultrasound_high_level_control" type="ControllerTuningGraphsNode.py" />
     
     
     

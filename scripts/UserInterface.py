@@ -4,7 +4,6 @@
 File containing UserInterface class.
 """
 
-
 # Import standard packages
 from tkinter import *
 from tkinter.scrolledtext import ScrolledText
@@ -439,9 +438,12 @@ class UserInterface(BasicNode):
             (self.d_gain_entry, R_MIDDLE_COLUMN, SINGLE_COLUMN, 4, SINGLE_ROW),
             (ttk.Button(developer_frame, text="Set Values", command=self.pid_value_setting_callback),
              RIGHT_COLUMN, SINGLE_COLUMN, 4, SINGLE_ROW),
-            (self.select_image_destination_directory, L_MIDDLE_COLUMN, THREE_COLUMN, 5, SINGLE_ROW),
-            (self.save_images_button, MIDDLE_COLUMN, SINGLE_COLUMN, 6, SINGLE_ROW),
         ]
+        # Only allow the user to save the images if the user interface is not in testing mode
+        if not passed_arguments.testing_mode:
+            developer_widgets.append((self.select_image_destination_directory, L_MIDDLE_COLUMN, THREE_COLUMN,
+                                      5, SINGLE_ROW))
+            developer_widgets.append((self.save_images_button, MIDDLE_COLUMN, SINGLE_COLUMN, 6, SINGLE_ROW))
 
         # endregion
 
@@ -855,7 +857,6 @@ class UserInterface(BasicNode):
         self.send_folder_destination_publisher.publish(askdirectory(initialdir='/home/ben',
                                                                     title="Select destination for saved images."))
 
-
     # endregion
     ############################################################################
 
@@ -1007,7 +1008,7 @@ if __name__ == "__main__":
     publishing_rate = 10  # hz
 
     # Run the publishing loop in the background alongside the TKinter main loop
-    root.after(round(1000/publishing_rate), node.publishing_loop)
+    root.after(round(1000 / publishing_rate), node.publishing_loop)
 
     # Run until the window is closed.
     root.mainloop()

@@ -70,6 +70,8 @@ TESTING: int = int(0)
 RUNNING: int = int(1)
 
 
+# TODO - Medium - Add robot controls to allow the user to move the robot around and override the image segmentation
+# TODO - Medium - Change topic names to use constants from topics files
 class UserInterface(BasicNode):
     def __init__(self, parent=None):
 

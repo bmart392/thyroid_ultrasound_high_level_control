@@ -21,6 +21,7 @@ from thyroid_ultrasound_support.BasicNode import *
 from thyroid_ultrasound_support.TopicNames import *
 
 
+# TODO - Medium - Check why the image error is not showing up properly
 class ControllerTuningGraphsNode(BasicNode):
 
     def __init__(self):

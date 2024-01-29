@@ -876,8 +876,8 @@ class UserInterface(BasicNode):
         """
         self.current_force_string_var.set(str(round(data.wrench.force.z, 2)))
 
-    def debug_status_messages_callback(self, data: String):
-        self.update_status(data.data)
+    def debug_status_messages_callback(self, data: log_message):
+        self.update_status(data)
 
     def p_gain_message_callback(self, data: Float64) -> None:
         """
@@ -922,11 +922,12 @@ class UserInterface(BasicNode):
             If no message is given, the empty status string will be shown.
         """
         if message is not None:
-            self.status_log_string = self.status_log_string + "\n" + message.message + "."
+            pass
+            """self.status_log_string = self.status_log_string + '\n' + message.message + "."
             self.status_label.configure(state=NORMAL)
             self.status_label.delete('1.0', END)
             self.status_label.insert(INSERT, self.status_log_string)
-            self.status_label.configure(state=DISABLED)
+            self.status_label.configure(state=DISABLED)"""
 
         # TODO - Low - Turn this into a better error logging device. Show message, time sent, and node sending
         # TODO - Low - Create an option to see minimal, standard, or verbose logging data.

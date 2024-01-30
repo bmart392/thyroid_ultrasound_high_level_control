@@ -21,7 +21,9 @@ from thyroid_ultrasound_support.BasicNode import *
 from thyroid_ultrasound_support.TopicNames import *
 
 
-# TODO - Medium - Check why the image error is not showing up properly
+# TODO - Dream - Build in proper logging through BasicNode class
+# TODO - Dream - Add proper exception handling for each part
+
 class ControllerTuningGraphsNode(BasicNode):
 
     def __init__(self):
@@ -29,7 +31,7 @@ class ControllerTuningGraphsNode(BasicNode):
         super().__init__()
 
         # Create the node object
-        init_node("ControllerTuningGraphsNode")
+        init_node(CONTROLLER_TUNING_GRAPHS)
 
         # Define custom node shutdown behavior
         on_shutdown(self.shutdown_node)

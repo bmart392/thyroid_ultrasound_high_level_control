@@ -7,6 +7,8 @@ File containing UserInterface class.
 # TODO - High - Add control for overall speed of the robot
 # TODO - Medium - Add robot controls to allow the user to move the robot around and override the image segmentation
 # TODO - Medium - Change topic names to use constants from topics files
+# TODO - High - When a scan button is pushed, it sends the create trajectory signal and the use pose feedback signal, it also activates the pose control button and changes the text to say Stop Pose Control
+# TODO - High - When the Stop pose control button is pressed, it sends a clear trajectory signal and a stop using pose feedback signal, it also deactivates the pose control button and changes the text to stay Start Pose control
 
 # Import standard packages
 from tkinter import *
@@ -25,7 +27,7 @@ from thyroid_ultrasound_support.TopicNames import *
 
 # Define constants used for logging purposes
 VERBOSE: int = int(0)
-NORMAL: int = int(1)
+# NORMAL: int = int(1)
 
 # Define constant to use as incremental increase and decrease value for force set-point
 INCREMENTAL_FORCE_CHANGE: float = 0.1
@@ -40,6 +42,8 @@ START_FORCE_CONTROL: str = "Start\nForce Control"
 STOP_FORCE_CONTROL: str = "Stop\nForce Control"
 START_BALANCING_CONTROL: str = "Start\nBalancing Control"
 STOP_BALANCING_CONTROL: str = "Stop\nBalancing Control"
+START_POSE_CONTROL: str = "Start\nPose Control"
+STOP_POSE_CONTROL: str = "Stop\nPose Control"
 TEST_FORCE_CONTROL: str = "Test Force\n Profile"
 STOP_TEST_FORCE_CONTROL: str = "Stop Testing\n Force Control"
 START_SAVING_IMAGES: str = "Start\nSaving Images"
@@ -163,6 +167,9 @@ class UserInterface(BasicNode):
         # Create a publisher to publish the command to scan upwards
         self.scan_command_publisher = Publisher(CREATE_TRAJECTORY, Float64, queue_size=1)
 
+        # Create a publisher to publish the command to clear the current trajectory
+        self.clear_trajectory_command_publisher = Publisher(CLEAR_TRAJECTORY, Bool, queue_size=1)
+
         # Create a publisher to publish the command to complete a full scan
         self.complete_full_scan_command_publisher = Publisher(COMPLETE_FULL_SCAN, Bool, queue_size=1)
 
@@ -255,20 +262,15 @@ class UserInterface(BasicNode):
                                                command=self.force_control_button_callback)
         self.balancing_control_button = ttk.Button(always_visible_frame, text=START_BALANCING_CONTROL,
                                                    command=self.balancing_control_button_callback)
+        self.pose_control_button = ttk.Button(always_visible_frame, text=STOP_POSE_CONTROL,
+                                              command=self.pose_control_button_callback, state=DISABLED)
+
         # List the widgets used for general control in the always visible frame at the bottom
         always_visible_streaming_widgets = [
-            WidgetCreationObject(self.force_control_button,
-                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=0, row_span=SINGLE_ROW,
-                                 padx=5, pady=5),
-            WidgetCreationObject(self.balancing_control_button,
-                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=0, row_span=SINGLE_ROW,
-                                 padx=5, pady=5),
-            WidgetCreationObject(self.image_control_button,
-                                 col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=0, row_span=SINGLE_ROW,
-                                 padx=5, pady=5),
+            WidgetCreationObject(self.force_control_button, col_num=MIDDLE_COLUMN, row_num=0),
+            WidgetCreationObject(self.balancing_control_button, col_num=R_MIDDLE_COLUMN, row_num=0),
+            WidgetCreationObject(self.image_control_button, col_num=RIGHT_COLUMN, row_num=0, ),
+            WidgetCreationObject(self.pose_control_button, col_num=RIGHT_COLUMN + 1, row_num=0)
         ]
 
         # Select which widgets to display in the always_visible_frame based on which function mode the GUI is in
@@ -306,7 +308,7 @@ class UserInterface(BasicNode):
                                                               command=self.load_existing_image_cropping_button_callback,
                                                               state=DISABLED)
         self.imaging_depth_entry = ttk.Entry(exam_setup_frame, validate=ALL,
-                                             validatecommand=(validation_command, '%P'), width=5)
+                                             validatecommand=(validation_command, '%P'), width=5, justify=CENTER)
         self.imaging_depth_entry.insert(0, '5.0')
         self.imaging_depth_submit_callback()
         self.identify_thyroid_from_points_button = ttk.Button(exam_setup_frame,
@@ -317,102 +319,43 @@ class UserInterface(BasicNode):
         # List the widgets used to populate the exam_setup_frame
         self.exam_setup_widgets = [
             WidgetCreationObject(ttk.Label(exam_setup_frame, text="Desired Force", anchor=CENTER, justify=CENTER),
-                                 col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=0, row_span=SINGLE_ROW,
-                                 ipadx=0, ipady=0,
-                                 padx=5, pady=5),
-            WidgetCreationObject(self.force_set_point_entry,
-                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=0, row_span=SINGLE_ROW,
-                                 ipadx=0, ipady=0,
-                                 padx=5, pady=20),
-            WidgetCreationObject(ttk.Label(exam_setup_frame, text="N"),
-                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=0, row_span=SINGLE_ROW,
-                                 ipadx=0, ipady=0,
-                                 padx=5, pady=5),
-            WidgetCreationObject(force_set_point_increase_button,
-                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=0, row_span=SINGLE_ROW,
-                                 padx=5, pady=5),
-            WidgetCreationObject(force_set_point_decrease_button,
-                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=1, row_span=SINGLE_ROW,
-                                 padx=5, pady=5),
+                                 col_num=LEFT_COLUMN, row_num=0),
+            WidgetCreationObject(self.force_set_point_entry, col_num=L_MIDDLE_COLUMN, row_num=0, pady=20),
+            WidgetCreationObject(ttk.Label(exam_setup_frame, text="N"), col_num=MIDDLE_COLUMN, row_num=0),
+            WidgetCreationObject(force_set_point_increase_button, col_num=R_MIDDLE_COLUMN, row_num=0),
+            WidgetCreationObject(force_set_point_decrease_button, col_num=R_MIDDLE_COLUMN, row_num=1),
             WidgetCreationObject(
                 ttk.Button(exam_setup_frame, text="Send New\nSet-point", command=self.force_set_point_submit_callback),
-                col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
-                row_num=0, row_span=DOUBLE_ROW,
-                padx=5, pady=5),
+                col_num=RIGHT_COLUMN, row_num=0, row_span=DOUBLE_ROW),
             WidgetCreationObject(ttk.Label(exam_setup_frame, text="Current Force", anchor=CENTER, justify=CENTER),
-                                 col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=1, row_span=SINGLE_ROW,
-                                 padx=5, pady=20),
-            WidgetCreationObject(self.current_force_label,
-                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=1, row_span=SINGLE_ROW),
+                                 col_num=LEFT_COLUMN, row_num=1, pady=20),
+            WidgetCreationObject(self.current_force_label, col_num=L_MIDDLE_COLUMN, row_num=1),
             WidgetCreationObject(ttk.Label(exam_setup_frame, text="N"),
-                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=1, row_span=DOUBLE_ROW,
-                                 ipadx=2, ipady=0,
-                                 padx=0, pady=5),
+                                 col_num=MIDDLE_COLUMN, row_num=1, ipadx=2, padx=0),
             WidgetCreationObject(ttk.Separator(exam_setup_frame),
-                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
-                                 row_num=3, row_span=SINGLE_ROW,
-                                 pady=5),
+                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=3, padx=0),
             WidgetCreationObject(ttk.Label(exam_setup_frame, text="Crop the raw image?", anchor=CENTER, justify=CENTER),
-                                 col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=4, row_span=DOUBLE_ROW),
+                                 col_num=LEFT_COLUMN, row_num=4, row_span=DOUBLE_ROW),
             WidgetCreationObject(Radiobutton(exam_setup_frame, text="Yes", variable=self.select_image_crop_variable,
                                              value=1, command=self.select_image_crop_callback,
-                                             anchor=CENTER, justify=CENTER),
-                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=4, row_span=SINGLE_ROW,
-                                 padx=5, pady=5),
+                                             anchor=CENTER, justify=CENTER), col_num=L_MIDDLE_COLUMN, row_num=4),
             WidgetCreationObject(Radiobutton(exam_setup_frame, text="No", variable=self.select_image_crop_variable,
                                              value=0, command=self.select_image_crop_callback,
-                                             anchor=CENTER, justify=CENTER),
-                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=4, row_span=SINGLE_ROW,
-                                 padx=5, pady=5),
-            WidgetCreationObject(self.generate_new_image_cropping_button,
-                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=4, row_span=SINGLE_ROW,
-                                 padx=5, pady=5),
-            WidgetCreationObject(self.load_existing_image_cropping_button,
-                                 col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=4, row_span=SINGLE_ROW,
-                                 padx=5, pady=5),
-            WidgetCreationObject(ttk.Separator(exam_setup_frame),
-                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
-                                 row_num=5, row_span=SINGLE_ROW,
-                                 pady=5),
+                                             anchor=CENTER, justify=CENTER), col_num=MIDDLE_COLUMN, row_num=4),
+            WidgetCreationObject(self.generate_new_image_cropping_button, col_num=R_MIDDLE_COLUMN, row_num=4),
+            WidgetCreationObject(self.load_existing_image_cropping_button, col_num=RIGHT_COLUMN, row_num=4),
+            WidgetCreationObject(ttk.Separator(exam_setup_frame), col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                 row_num=5, padx=0),
             WidgetCreationObject(ttk.Label(exam_setup_frame, text="Set the imaging depth\nof the US scanner:",
-                                           anchor=CENTER, justify=CENTER),
-                                 col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=6, row_span=SINGLE_ROW,
-                                 padx=5, pady=5),
-            WidgetCreationObject(self.imaging_depth_entry,
-                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=6, row_span=SINGLE_ROW,
-                                 padx=5, pady=20),
-            WidgetCreationObject(ttk.Label(exam_setup_frame, text="cm"),
-                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=6, row_span=SINGLE_ROW,
-                                 ipadx=0, ipady=0,
-                                 padx=5, pady=5),
+                                           anchor=CENTER, justify=CENTER), col_num=LEFT_COLUMN, row_num=6),
+            WidgetCreationObject(self.imaging_depth_entry, col_num=L_MIDDLE_COLUMN, row_num=6, pady=20),
+            WidgetCreationObject(ttk.Label(exam_setup_frame, text="cm"), col_num=MIDDLE_COLUMN, row_num=6),
             WidgetCreationObject(ttk.Button(exam_setup_frame, text="Send", command=self.imaging_depth_submit_callback),
-                                 col_num=R_MIDDLE_COLUMN, col_span=TWO_COLUMN,
-                                 row_num=6, row_span=SINGLE_ROW,
-                                 padx=5, pady=5),
-            WidgetCreationObject(ttk.Separator(exam_setup_frame),
-                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
-                                 row_num=7, row_span=SINGLE_ROW,
-                                 pady=5),
-            WidgetCreationObject(self.identify_thyroid_from_points_button,
-                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
-                                 row_num=8, row_span=SINGLE_ROW,
-                                 padx=5, pady=5),
+                                 col_num=R_MIDDLE_COLUMN, col_span=TWO_COLUMN, row_num=6),
+            WidgetCreationObject(ttk.Separator(exam_setup_frame), col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                 row_num=7, padx=0),
+            WidgetCreationObject(self.identify_thyroid_from_points_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                 row_num=8),
         ]
 
         # endregion
@@ -432,7 +375,8 @@ class UserInterface(BasicNode):
                                                text="Scan Negative",
                                                command=self.scan_negative_button_callback,
                                                )
-        self.scan_distance_entry = Entry(thyroid_exam_frame, validate=ALL, validatecommand=(validation_command, '%P'))
+        self.scan_distance_entry = Entry(thyroid_exam_frame, validate=ALL, validatecommand=(validation_command, '%P'),
+                                         justify=CENTER, width=5)
         self.scan_distance_entry.insert(0, '6.0')
         self.complete_full_scan_button = ttk.Button(thyroid_exam_frame,
                                                     text="Complete\n Full Scan",
@@ -443,49 +387,45 @@ class UserInterface(BasicNode):
 
         # List the widgets to used to populate the thyroid exam frame
         self.thyroid_exam_widgets = [
-            WidgetCreationObject(self.identify_thyroid_from_template_button,
-                                 col_num=R_MIDDLE_COLUMN, col_span=TWO_COLUMN,
-                                 row_num=0, row_span=SINGLE_ROW),
+            # WidgetCreationObject(self.identify_thyroid_from_template_button,
+            #                      col_num=R_MIDDLE_COLUMN, col_span=TWO_COLUMN, row_num=0),
+            WidgetCreationObject(ttk.Label(thyroid_exam_frame, text="Scanning Distance", anchor=CENTER, justify=CENTER),
+                                 col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=0),
+            WidgetCreationObject(self.scan_distance_entry, col_num=L_MIDDLE_COLUMN, row_num=0),
+            WidgetCreationObject(ttk.Label(thyroid_exam_frame, text="cm"),
+                                 col_num=MIDDLE_COLUMN, row_num=0, ipadx=2, padx=0),
             WidgetCreationObject(self.scan_positive_button,
-                                 col_num=LEFT_COLUMN, col_span=TWO_COLUMN,
-                                 row_num=1, row_span=SINGLE_ROW),
+                                 col_num=R_MIDDLE_COLUMN, row_num=0),
             WidgetCreationObject(self.scan_negative_button,
-                                 col_num=LEFT_COLUMN, col_span=TWO_COLUMN,
-                                 row_num=2, row_span=SINGLE_ROW),
-            WidgetCreationObject(ttk.Label(thyroid_exam_frame, text="Scanning Distance (cm)"),
-                                 col_num=MIDDLE_COLUMN, col_span=TWO_COLUMN,
-                                 row_num=1, row_span=SINGLE_ROW),
-            WidgetCreationObject(self.scan_distance_entry,
-                                 col_num=MIDDLE_COLUMN, col_span=TWO_COLUMN,
-                                 row_num=2, row_span=SINGLE_ROW),
-            WidgetCreationObject(self.complete_full_scan_button,
-                                 col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=1, row_span=DOUBLE_ROW),
-            WidgetCreationObject(ttk.Label(thyroid_exam_frame, text="Would you like to generate a volume?"),
-                                 col_num=LEFT_COLUMN, col_span=THREE_COLUMN, row_num=3, row_span=SINGLE_ROW),
-            WidgetCreationObject(
-                Radiobutton(thyroid_exam_frame, text="Yes", variable=self.generate_volume_selector_variable,
-                            value=1, command=self.generate_volume_button_callback),
-                col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                row_num=3, row_span=SINGLE_ROW),
-            WidgetCreationObject(
-                Radiobutton(thyroid_exam_frame, text="No", variable=self.generate_volume_selector_variable,
-                            value=0, command=self.generate_volume_button_callback),
-                col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
-                row_num=3, row_span=SINGLE_ROW),
-            WidgetCreationObject(ttk.Label(thyroid_exam_frame, text="Would you like to display the volume?"),
-                                 col_num=LEFT_COLUMN, col_span=THREE_COLUMN,
-                                 row_num=4, row_span=SINGLE_ROW),
-            WidgetCreationObject(
-                Radiobutton(thyroid_exam_frame, text="Yes", variable=self.display_volume_selector_variable,
-                            value=1, command=self.display_volume_button_callback),
-                col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                row_num=4, row_span=SINGLE_ROW),
-            WidgetCreationObject(
-                Radiobutton(thyroid_exam_frame, text="No", variable=self.display_volume_selector_variable,
-                            value=0, command=self.display_volume_button_callback),
-                col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
-                row_num=4, row_span=SINGLE_ROW),
+                                 col_num=RIGHT_COLUMN, row_num=0),
+            # WidgetCreationObject(self.complete_full_scan_button,
+            #                      col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
+            #                      row_num=1, row_span=DOUBLE_ROW),
+            # WidgetCreationObject(ttk.Label(thyroid_exam_frame, text="Would you like to generate a volume?"),
+            #                      col_num=LEFT_COLUMN, col_span=THREE_COLUMN, row_num=3, row_span=SINGLE_ROW),
+            # WidgetCreationObject(
+            #     Radiobutton(thyroid_exam_frame, text="Yes", variable=self.generate_volume_selector_variable,
+            #                 value=1, command=self.generate_volume_button_callback),
+            #     col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+            #     row_num=3, row_span=SINGLE_ROW),
+            # WidgetCreationObject(
+            #     Radiobutton(thyroid_exam_frame, text="No", variable=self.generate_volume_selector_variable,
+            #                 value=0, command=self.generate_volume_button_callback),
+            #     col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
+            #     row_num=3, row_span=SINGLE_ROW),
+            # WidgetCreationObject(ttk.Label(thyroid_exam_frame, text="Would you like to display the volume?"),
+            #                      col_num=LEFT_COLUMN, col_span=THREE_COLUMN,
+            #                      row_num=4, row_span=SINGLE_ROW),
+            # WidgetCreationObject(
+            #     Radiobutton(thyroid_exam_frame, text="Yes", variable=self.display_volume_selector_variable,
+            #                 value=1, command=self.display_volume_button_callback),
+            #     col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+            #     row_num=4, row_span=SINGLE_ROW),
+            # WidgetCreationObject(
+            #     Radiobutton(thyroid_exam_frame, text="No", variable=self.display_volume_selector_variable,
+            #                 value=0, command=self.display_volume_button_callback),
+            #     col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
+            #     row_num=4, row_span=SINGLE_ROW),
         ]
 
         # endregion
@@ -785,6 +725,9 @@ class UserInterface(BasicNode):
             Float64(float(self.scan_distance_entry.get()) / 100)  # convert cm to m
         )
 
+        # Update the pose control button
+        self.update_pose_control_button()
+
     def scan_negative_button_callback(self) -> None:
         """
         Publish the command to scan downwards.
@@ -792,6 +735,20 @@ class UserInterface(BasicNode):
         self.scan_command_publisher.publish(
             Float64(-float(self.scan_distance_entry.get()) / 100)  # convert cm to m
         )
+
+        # Update the pose control button
+        self.update_pose_control_button()
+
+    def update_pose_control_button(self) -> None:
+
+        # Set that pose feedback is now being used
+        self.currently_using_pose_feedback = True
+
+        # Publish that pose feedback is now being used
+        self.use_pose_feedback_command_publisher.publish(Bool(self.currently_using_pose_feedback))
+
+        # Update the pose control button
+        self.pose_control_button[WIDGET_STATE] = NORMAL
 
     def complete_full_scan_button_callback(self) -> None:
         """
@@ -945,6 +902,23 @@ class UserInterface(BasicNode):
 
         # Set the new text of the button
         self.balancing_control_button[WIDGET_TEXT] = new_button_text
+
+    def pose_control_button_callback(self):
+        """
+        Toggles if the robot will use pose feedback, based on the user input.
+        """
+
+        # Set the state to be that the robot is not currently using force_feedback
+        self.currently_using_pose_feedback = False
+
+        # Publish the command to stop using force feedback
+        self.use_pose_feedback_command_publisher.publish(Bool(self.currently_using_pose_feedback))
+
+        # Publish the command to clear the trajectory
+        self.clear_trajectory_command_publisher.publish(Bool(True))
+
+        # Set the state of the button
+        self.pose_control_button[WIDGET_STATE] = DISABLED
 
     def pid_controller_selection_callback(self) -> None:
         """
@@ -1120,10 +1094,10 @@ class UserInterface(BasicNode):
 class WidgetCreationObject:
 
     def __init__(self, widget_object,
-                 col_num: int, col_span: int,
-                 row_num: int, row_span: int,
+                 col_num: int, row_num: int,
+                 col_span: int = SINGLE_ROW, row_span: int = SINGLE_COLUMN,
                  ipadx: int = 0, ipady: int = 0,
-                 padx: int = 0, pady: int = 0,
+                 padx: int = 5, pady: int = 5,
                  sticky: str = 'nsew'):
         self.widget_object = widget_object
         self.col_num = col_num

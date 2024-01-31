@@ -32,25 +32,25 @@ INCREMENTAL_FORCE_CHANGE: float = 0.1
 NUM_DIGITS_OF_FORCE_TO_DISPLAY: int = int(2)
 
 # Define constants for GUI elements
-START_IMAGE_STREAMING: str = "Start Image Streaming"
-STOP_IMAGE_STREAMING: str = "Stop Image Streaming"
-START_IMAGE_FILTER: str = "Start Image Filtering"
-STOP_IMAGE_FILTER: str = "Stop Image Filtering"
-START_FORCE_CONTROL: str = "Start Force Control"
-STOP_FORCE_CONTROL: str = "Stop Force Control"
-ENABLE_ROBOT_MOVEMENT: str = "ENABLE Robot Movement"
-DISABLE_ROBOT_MOVEMENT: str = "DISABLE Robot Movement"
+START_IMAGE_STREAMING: str = "Start\nImage Streaming"
+STOP_IMAGE_STREAMING: str = "Stop\nImage Streaming"
+START_IMAGE_CONTROL: str = "Start\nImage Control"
+STOP_IMAGE_CONTROL: str = "Stop\nImage Control"
+START_FORCE_CONTROL: str = "Start\nForce Control"
+STOP_FORCE_CONTROL: str = "Stop\nForce Control"
+START_BALANCING_CONTROL: str = "Start\nBalancing Control"
+STOP_BALANCING_CONTROL: str = "Stop\nBalancing Control"
 TEST_FORCE_CONTROL: str = "Test Force\n Profile"
 STOP_TEST_FORCE_CONTROL: str = "Stop Testing\n Force Control"
-START_SAVING_IMAGES: str = "Start Saving Images"
-STOP_SAVING_IMAGES: str = "Stop Saving Images"
+START_SAVING_IMAGES: str = "Start\nSaving Images"
+STOP_SAVING_IMAGES: str = "Stop\nSaving Images"
 
 # Define constants for parameters of widgets
 WIDGET_TEXT: str = 'text'
 WIDGET_STATE: str = 'state'
 
 # Define grid geometry constants
-FULL_WIDTH: int = int(5)
+FULL_WIDTH: int = int(6)
 THREE_COLUMN: int = int(3)
 TWO_COLUMN: int = int(2)
 
@@ -112,11 +112,15 @@ class UserInterface(BasicNode):
         self.i_gain_publisher = Publisher(I_GAIN_SETTING, Float64, queue_size=1)
         self.d_gain_publisher = Publisher(D_GAIN_SETTING, Float64, queue_size=1)
 
-        # Create a publisher to publish the command to start and stop filtering images
-        self.filter_images_command_publisher = Publisher(FILTER_IMAGES, Bool, queue_size=1)
+        # Create a publisher to publish the command to use image feedback
+        self.use_image_feedback_command_publisher = Publisher(USE_IMAGE_FEEDBACK, Bool, queue_size=1)
 
         # Create a publisher to publish the command to use force feedback
         self.use_force_feedback_command_publisher = Publisher(USE_FORCE_FEEDBACK, Bool,
+                                                              queue_size=1)
+
+        # Create a publisher to publish the command to use balancing feedback
+        self.use_balancing_feedback_command_publisher = Publisher(USE_BALANCING_FEEDBACK, Bool,
                                                               queue_size=1)
 
         # Create a publisher to publish the command to start and stop the robot motion
@@ -192,9 +196,10 @@ class UserInterface(BasicNode):
         # region
 
         # Define parameters used in the logic of the GUI
-        self.currently_filtering = False
+        self.currently_using_image_control = False
         self.currently_using_force_feedback = False
         self.currently_using_pose_feedback = False
+        self.currently_using_balancing_feedback = False
 
         # Set the title of the window
         self.parent.title("User Interface")
@@ -227,30 +232,43 @@ class UserInterface(BasicNode):
         # Define the buttons used for image streaming in testing
         self.image_streaming_button = ttk.Button(always_visible_frame, text=START_IMAGE_STREAMING,
                                                  command=self.image_streaming_button_callback)
-        self.restart_image_streaming_button = ttk.Button(always_visible_frame, text="Restart Image Streaming",
+        self.restart_image_streaming_button = ttk.Button(always_visible_frame, text="Restart\nImage Streaming",
                                                          command=self.restart_image_streaming_button_callback,
                                                          )
 
         # List the widgets used for testing in the always visible frame at the bottom
         always_visible_testing_widgets = [
-            (self.image_streaming_button, LEFT_COLUMN, SINGLE_COLUMN, 0, 1),
-            (self.restart_image_streaming_button, L_MIDDLE_COLUMN, SINGLE_COLUMN, 0, 1),
+            WidgetCreationObject(self.image_streaming_button,
+                                 col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=0, row_span=SINGLE_ROW,
+                                 padx=5, pady=5),
+            WidgetCreationObject(self.restart_image_streaming_button,
+                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=0, row_span=SINGLE_ROW,
+                                 padx=5, pady=5),
         ]
 
         # Define the buttons used for general control
-        self.image_filtering_button = ttk.Button(always_visible_frame, text=START_IMAGE_FILTER,
-                                                 command=self.image_filtering_button_callback)
+        self.image_control_button = ttk.Button(always_visible_frame, text=START_IMAGE_CONTROL,
+                                               command=self.image_control_button_callback)
         self.force_control_button = ttk.Button(always_visible_frame, text=START_FORCE_CONTROL,
                                                command=self.force_control_button_callback)
-        self.allow_robot_movement_button = ttk.Button(always_visible_frame, text=ENABLE_ROBOT_MOVEMENT,
-                                                      command=self.allow_robot_movement_button_callback,
-                                                      state=DISABLED)
-
+        self.balancing_control_button = ttk.Button(always_visible_frame, text=START_BALANCING_CONTROL,
+                                                   command=self.balancing_control_button_callback)
         # List the widgets used for general control in the always visible frame at the bottom
         always_visible_streaming_widgets = [
-            (self.image_filtering_button, MIDDLE_COLUMN, SINGLE_COLUMN, 0, SINGLE_ROW),
-            (self.force_control_button, R_MIDDLE_COLUMN, SINGLE_COLUMN, 0, SINGLE_ROW),
-            (self.allow_robot_movement_button, RIGHT_COLUMN, SINGLE_COLUMN, 0, SINGLE_ROW),
+            WidgetCreationObject(self.force_control_button,
+                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=0, row_span=SINGLE_ROW,
+                                 padx=5, pady=5),
+            WidgetCreationObject(self.balancing_control_button,
+                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=0, row_span=SINGLE_ROW,
+                                 padx=5, pady=5),
+            WidgetCreationObject(self.image_control_button,
+                                 col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=0, row_span=SINGLE_ROW,
+                                 padx=5, pady=5),
         ]
 
         # Select which widgets to display in the always_visible_frame based on which function mode the GUI is in
@@ -264,8 +282,8 @@ class UserInterface(BasicNode):
         # region
         validation_command = self.parent.register(self.entry_widget_float_validation)
         self.force_set_point_entry = ttk.Entry(exam_setup_frame, validate=ALL,
-                                               validatecommand=(validation_command, '%P'))
-        # self.force_set_point_entry.bind('<Return>', self.force_set_point_submit_callback)
+                                               validatecommand=(validation_command, '%P'),
+                                               width=5, justify=CENTER)
         self.force_set_point_entry.insert(0, '0.0')
         force_set_point_increase_button = ttk.Button(exam_setup_frame, text="+",
                                                      command=lambda: self.force_set_point_change_incremental(
@@ -277,54 +295,130 @@ class UserInterface(BasicNode):
         self.current_force_string_var = StringVar(exam_setup_frame, "0.0")
         self.test_force_profile_button = ttk.Button(exam_setup_frame, text=TEST_FORCE_CONTROL,
                                                     command=self.test_force_profile_callback)
-        self.current_force_label = ttk.Label(exam_setup_frame, textvariable=self.current_force_string_var)
+        self.current_force_label = ttk.Label(exam_setup_frame, textvariable=self.current_force_string_var,
+                                             anchor=CENTER, justify=CENTER)
         self.select_image_crop_variable = IntVar()
-        self.generate_new_image_cropping_button = ttk.Button(exam_setup_frame, text="Generate a New Image Cropping",
+        self.generate_new_image_cropping_button = ttk.Button(exam_setup_frame, text="Generate a New\nImage Cropping",
                                                              command=self.generate_new_image_cropping_button_callback,
                                                              state=DISABLED)
         self.load_existing_image_cropping_button = ttk.Button(exam_setup_frame,
-                                                              text="Load Existing Image Cropping",
+                                                              text="Load Existing\nImage Cropping",
                                                               command=self.load_existing_image_cropping_button_callback,
                                                               state=DISABLED)
         self.imaging_depth_entry = ttk.Entry(exam_setup_frame, validate=ALL,
-                                             validatecommand=(validation_command, '%P'))
+                                             validatecommand=(validation_command, '%P'), width=5)
         self.imaging_depth_entry.insert(0, '5.0')
         self.imaging_depth_submit_callback()
+        self.identify_thyroid_from_points_button = ttk.Button(exam_setup_frame,
+                                                              text="Identify Region of Interest from Points",
+                                                              command=self.identify_thyroid_from_points_button_callback,
+                                                              )
 
         # List the widgets used to populate the exam_setup_frame
         self.exam_setup_widgets = [
-            (ttk.Label(exam_setup_frame, text="Current Set-point (N):"), LEFT_COLUMN, SINGLE_COLUMN, 0, DOUBLE_ROW),
-            (self.force_set_point_entry, L_MIDDLE_COLUMN, SINGLE_COLUMN, 0, DOUBLE_ROW),
-            (force_set_point_increase_button, MIDDLE_COLUMN, SINGLE_COLUMN, 0, SINGLE_ROW),
-            (force_set_point_decrease_button, MIDDLE_COLUMN, SINGLE_COLUMN, 1, SINGLE_ROW),
-            (ttk.Button(exam_setup_frame, text="Send", command=self.force_set_point_submit_callback),
-             R_MIDDLE_COLUMN, SINGLE_COLUMN, 0, DOUBLE_ROW),
-            (self.test_force_profile_button, RIGHT_COLUMN, TWO_COLUMN, 0, 3),
-            (ttk.Label(exam_setup_frame, text="Current Force (N):"), LEFT_COLUMN, SINGLE_COLUMN, 2, SINGLE_ROW),
-            (self.current_force_label, L_MIDDLE_COLUMN, SINGLE_COLUMN, 2, SINGLE_ROW),
-            (ttk.Label(exam_setup_frame, text="Would you like to\ncrop the raw image?"),
-             LEFT_COLUMN, SINGLE_COLUMN, 3, SINGLE_ROW),
-            (Radiobutton(exam_setup_frame, text="Yes", variable=self.select_image_crop_variable,
-                         value=1, command=self.select_image_crop_callback), LEFT_COLUMN, SINGLE_COLUMN, 4, SINGLE_ROW),
-            (Radiobutton(exam_setup_frame, text="No", variable=self.select_image_crop_variable,
-                         value=0, command=self.select_image_crop_callback), LEFT_COLUMN, SINGLE_COLUMN, 5, SINGLE_ROW),
-            (self.generate_new_image_cropping_button, L_MIDDLE_COLUMN, TWO_COLUMN, 4, DOUBLE_ROW),
-            (self.load_existing_image_cropping_button, R_MIDDLE_COLUMN, TWO_COLUMN, 4, DOUBLE_ROW),
-            (ttk.Label(exam_setup_frame, text="Set the imaging depth (cm)\nof the US scanner:"),
-             LEFT_COLUMN, SINGLE_COLUMN, 6, SINGLE_ROW),
-            (self.imaging_depth_entry, L_MIDDLE_COLUMN, SINGLE_COLUMN, 6, SINGLE_ROW),
-            (ttk.Button(exam_setup_frame, text="Send", command=self.imaging_depth_submit_callback),
-             MIDDLE_COLUMN, TWO_COLUMN, 6, SINGLE_ROW),
+            WidgetCreationObject(ttk.Label(exam_setup_frame, text="Desired Force", anchor=CENTER, justify=CENTER),
+                                 col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=0, row_span=SINGLE_ROW,
+                                 ipadx=0, ipady=0,
+                                 padx=5, pady=5),
+            WidgetCreationObject(self.force_set_point_entry,
+                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=0, row_span=SINGLE_ROW,
+                                 ipadx=0, ipady=0,
+                                 padx=5, pady=20),
+            WidgetCreationObject(ttk.Label(exam_setup_frame, text="N"),
+                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=0, row_span=SINGLE_ROW,
+                                 ipadx=0, ipady=0,
+                                 padx=5, pady=5),
+            WidgetCreationObject(force_set_point_increase_button,
+                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=0, row_span=SINGLE_ROW,
+                                 padx=5, pady=5),
+            WidgetCreationObject(force_set_point_decrease_button,
+                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=1, row_span=SINGLE_ROW,
+                                 padx=5, pady=5),
+            WidgetCreationObject(
+                ttk.Button(exam_setup_frame, text="Send New\nSet-point", command=self.force_set_point_submit_callback),
+                col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
+                row_num=0, row_span=DOUBLE_ROW,
+                padx=5, pady=5),
+            WidgetCreationObject(ttk.Label(exam_setup_frame, text="Current Force", anchor=CENTER, justify=CENTER),
+                                 col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=1, row_span=SINGLE_ROW,
+                                 padx=5, pady=20),
+            WidgetCreationObject(self.current_force_label,
+                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=1, row_span=SINGLE_ROW),
+            WidgetCreationObject(ttk.Label(exam_setup_frame, text="N"),
+                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=1, row_span=DOUBLE_ROW,
+                                 ipadx=2, ipady=0,
+                                 padx=0, pady=5),
+            WidgetCreationObject(ttk.Separator(exam_setup_frame),
+                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                 row_num=3, row_span=SINGLE_ROW,
+                                 pady=5),
+            WidgetCreationObject(ttk.Label(exam_setup_frame, text="Crop the raw image?", anchor=CENTER, justify=CENTER),
+                                 col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=4, row_span=DOUBLE_ROW),
+            WidgetCreationObject(Radiobutton(exam_setup_frame, text="Yes", variable=self.select_image_crop_variable,
+                                             value=1, command=self.select_image_crop_callback,
+                                             anchor=CENTER, justify=CENTER),
+                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=4, row_span=SINGLE_ROW,
+                                 padx=5, pady=5),
+            WidgetCreationObject(Radiobutton(exam_setup_frame, text="No", variable=self.select_image_crop_variable,
+                                             value=0, command=self.select_image_crop_callback,
+                                             anchor=CENTER, justify=CENTER),
+                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=4, row_span=SINGLE_ROW,
+                                 padx=5, pady=5),
+            WidgetCreationObject(self.generate_new_image_cropping_button,
+                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=4, row_span=SINGLE_ROW,
+                                 padx=5, pady=5),
+            WidgetCreationObject(self.load_existing_image_cropping_button,
+                                 col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=4, row_span=SINGLE_ROW,
+                                 padx=5, pady=5),
+            WidgetCreationObject(ttk.Separator(exam_setup_frame),
+                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                 row_num=5, row_span=SINGLE_ROW,
+                                 pady=5),
+            WidgetCreationObject(ttk.Label(exam_setup_frame, text="Set the imaging depth\nof the US scanner:",
+                                           anchor=CENTER, justify=CENTER),
+                                 col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=6, row_span=SINGLE_ROW,
+                                 padx=5, pady=5),
+            WidgetCreationObject(self.imaging_depth_entry,
+                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=6, row_span=SINGLE_ROW,
+                                 padx=5, pady=20),
+            WidgetCreationObject(ttk.Label(exam_setup_frame, text="cm"),
+                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=6, row_span=SINGLE_ROW,
+                                 ipadx=0, ipady=0,
+                                 padx=5, pady=5),
+            WidgetCreationObject(ttk.Button(exam_setup_frame, text="Send", command=self.imaging_depth_submit_callback),
+                                 col_num=R_MIDDLE_COLUMN, col_span=TWO_COLUMN,
+                                 row_num=6, row_span=SINGLE_ROW,
+                                 padx=5, pady=5),
+            WidgetCreationObject(ttk.Separator(exam_setup_frame),
+                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                 row_num=7, row_span=SINGLE_ROW,
+                                 pady=5),
+            WidgetCreationObject(self.identify_thyroid_from_points_button,
+                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                 row_num=8, row_span=SINGLE_ROW,
+                                 padx=5, pady=5),
         ]
 
         # endregion
 
         # Define the widgets used to populate the thyroid exam frame
         # region
-        self.identify_thyroid_from_points_button = ttk.Button(thyroid_exam_frame,
-                                                              text="Identify Thyroid from Points",
-                                                              command=self.identify_thyroid_from_points_button_callback,
-                                                              )
         self.identify_thyroid_from_template_button = \
             ttk.Button(thyroid_exam_frame,
                        text="Identify Thyroid from Template",
@@ -349,27 +443,49 @@ class UserInterface(BasicNode):
 
         # List the widgets to used to populate the thyroid exam frame
         self.thyroid_exam_widgets = [
-            (self.identify_thyroid_from_points_button, LEFT_COLUMN, TWO_COLUMN, 0, 1),
-            (self.identify_thyroid_from_template_button, R_MIDDLE_COLUMN, TWO_COLUMN, 0, 1),
-            (self.scan_positive_button, LEFT_COLUMN, TWO_COLUMN, 1, 1),
-            (self.scan_negative_button, LEFT_COLUMN, TWO_COLUMN, 2, 1),
-            (ttk.Label(thyroid_exam_frame, text="Scanning Distance (cm)"), MIDDLE_COLUMN, TWO_COLUMN, 1, 1),
-            (self.scan_distance_entry, MIDDLE_COLUMN, TWO_COLUMN, 2, 1),
-            (self.complete_full_scan_button, RIGHT_COLUMN, SINGLE_COLUMN, 1, 2),
-            (ttk.Label(thyroid_exam_frame, text="Would you like to generate a volume?"),
-             LEFT_COLUMN, THREE_COLUMN, 3, 1),
-            (Radiobutton(thyroid_exam_frame, text="Yes", variable=self.generate_volume_selector_variable,
-                         value=1, command=self.generate_volume_button_callback), R_MIDDLE_COLUMN, SINGLE_COLUMN, 3, 1),
-            (Radiobutton(thyroid_exam_frame, text="No", variable=self.generate_volume_selector_variable,
-                         value=0, command=self.generate_volume_button_callback), RIGHT_COLUMN, SINGLE_COLUMN, 3, 1),
-            (ttk.Label(thyroid_exam_frame, text="Would you like to display the volume?"),
-             LEFT_COLUMN, THREE_COLUMN, 4, 1),
-            (Radiobutton(thyroid_exam_frame, text="Yes", variable=self.display_volume_selector_variable,
-                         value=1, command=self.display_volume_button_callback),
-             R_MIDDLE_COLUMN, SINGLE_COLUMN, 4, 1),
-            (Radiobutton(thyroid_exam_frame, text="No", variable=self.display_volume_selector_variable,
-                         value=0, command=self.display_volume_button_callback),
-             RIGHT_COLUMN, SINGLE_COLUMN, 4, 1),
+            WidgetCreationObject(self.identify_thyroid_from_template_button,
+                                 col_num=R_MIDDLE_COLUMN, col_span=TWO_COLUMN,
+                                 row_num=0, row_span=SINGLE_ROW),
+            WidgetCreationObject(self.scan_positive_button,
+                                 col_num=LEFT_COLUMN, col_span=TWO_COLUMN,
+                                 row_num=1, row_span=SINGLE_ROW),
+            WidgetCreationObject(self.scan_negative_button,
+                                 col_num=LEFT_COLUMN, col_span=TWO_COLUMN,
+                                 row_num=2, row_span=SINGLE_ROW),
+            WidgetCreationObject(ttk.Label(thyroid_exam_frame, text="Scanning Distance (cm)"),
+                                 col_num=MIDDLE_COLUMN, col_span=TWO_COLUMN,
+                                 row_num=1, row_span=SINGLE_ROW),
+            WidgetCreationObject(self.scan_distance_entry,
+                                 col_num=MIDDLE_COLUMN, col_span=TWO_COLUMN,
+                                 row_num=2, row_span=SINGLE_ROW),
+            WidgetCreationObject(self.complete_full_scan_button,
+                                 col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=1, row_span=DOUBLE_ROW),
+            WidgetCreationObject(ttk.Label(thyroid_exam_frame, text="Would you like to generate a volume?"),
+                                 col_num=LEFT_COLUMN, col_span=THREE_COLUMN, row_num=3, row_span=SINGLE_ROW),
+            WidgetCreationObject(
+                Radiobutton(thyroid_exam_frame, text="Yes", variable=self.generate_volume_selector_variable,
+                            value=1, command=self.generate_volume_button_callback),
+                col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                row_num=3, row_span=SINGLE_ROW),
+            WidgetCreationObject(
+                Radiobutton(thyroid_exam_frame, text="No", variable=self.generate_volume_selector_variable,
+                            value=0, command=self.generate_volume_button_callback),
+                col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
+                row_num=3, row_span=SINGLE_ROW),
+            WidgetCreationObject(ttk.Label(thyroid_exam_frame, text="Would you like to display the volume?"),
+                                 col_num=LEFT_COLUMN, col_span=THREE_COLUMN,
+                                 row_num=4, row_span=SINGLE_ROW),
+            WidgetCreationObject(
+                Radiobutton(thyroid_exam_frame, text="Yes", variable=self.display_volume_selector_variable,
+                            value=1, command=self.display_volume_button_callback),
+                col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                row_num=4, row_span=SINGLE_ROW),
+            WidgetCreationObject(
+                Radiobutton(thyroid_exam_frame, text="No", variable=self.display_volume_selector_variable,
+                            value=0, command=self.display_volume_button_callback),
+                col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
+                row_num=4, row_span=SINGLE_ROW),
         ]
 
         # endregion
@@ -386,7 +502,8 @@ class UserInterface(BasicNode):
 
         # Define the widgets used for setting up the status logging
         status_logging_widgets = [
-            (self.status_label, LEFT_COLUMN, FULL_WIDTH, 0, 1),
+            WidgetCreationObject(self.status_label, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                 row_num=0, row_span=SINGLE_ROW),
         ]
 
         # endregion
@@ -410,44 +527,79 @@ class UserInterface(BasicNode):
                                                              command=self.send_save_images_destination)
 
         developer_widgets = [
-            (ttk.Label(developer_frame, text="Select\nController"), LEFT_COLUMN, SINGLE_COLUMN, 0, DOUBLE_ROW),
-            (Radiobutton(developer_frame, text="x-lin-trj", variable=self.pid_selector,
-                         value=0, command=self.pid_controller_selection_callback),
-             L_MIDDLE_COLUMN, SINGLE_COLUMN, 0, SINGLE_ROW,),
-            (Radiobutton(developer_frame, text="y-lin-img", variable=self.pid_selector,
-                         value=1, command=self.pid_controller_selection_callback),
-             MIDDLE_COLUMN, SINGLE_COLUMN, 0, SINGLE_ROW,),
-            (Radiobutton(developer_frame, text="z-lin-force", variable=self.pid_selector,
-                         value=2, command=self.pid_controller_selection_callback),
-             R_MIDDLE_COLUMN, SINGLE_COLUMN, 0, SINGLE_ROW,),
-            (Radiobutton(developer_frame, text="x-ang-N/A", variable=self.pid_selector,
-                         value=3, command=self.pid_controller_selection_callback),
-             L_MIDDLE_COLUMN, SINGLE_COLUMN, 1, SINGLE_ROW,),
-            (Radiobutton(developer_frame, text="y-ang-N/A", variable=self.pid_selector,
-                         value=4, command=self.pid_controller_selection_callback),
-             MIDDLE_COLUMN, SINGLE_COLUMN, 1, SINGLE_ROW,),
-            (Radiobutton(developer_frame, text="z-ang-N/A", variable=self.pid_selector,
-                         value=5, command=self.pid_controller_selection_callback),
-             R_MIDDLE_COLUMN, SINGLE_COLUMN, 1, SINGLE_ROW,),
-            (ttk.Label(developer_frame, text="P"), L_MIDDLE_COLUMN, SINGLE_COLUMN, 2, SINGLE_ROW),
-            (ttk.Label(developer_frame, text="I"), MIDDLE_COLUMN, SINGLE_COLUMN, 2, SINGLE_ROW),
-            (ttk.Label(developer_frame, text="D"), R_MIDDLE_COLUMN, SINGLE_COLUMN, 2, SINGLE_ROW),
-            (ttk.Label(developer_frame, text="Current Values:"), LEFT_COLUMN, SINGLE_COLUMN, 3, SINGLE_ROW),
-            (ttk.Label(developer_frame, textvariable=self.p_gain_var), L_MIDDLE_COLUMN, SINGLE_COLUMN, 3, SINGLE_ROW),
-            (ttk.Label(developer_frame, textvariable=self.i_gain_var), MIDDLE_COLUMN, SINGLE_COLUMN, 3, SINGLE_ROW),
-            (ttk.Label(developer_frame, textvariable=self.d_gain_var), R_MIDDLE_COLUMN, SINGLE_COLUMN, 3, SINGLE_ROW),
-            (ttk.Label(developer_frame, text="Set to:"), LEFT_COLUMN, SINGLE_COLUMN, 4, SINGLE_ROW),
-            (self.p_gain_entry, L_MIDDLE_COLUMN, SINGLE_COLUMN, 4, SINGLE_ROW),
-            (self.i_gain_entry, MIDDLE_COLUMN, SINGLE_COLUMN, 4, SINGLE_ROW),
-            (self.d_gain_entry, R_MIDDLE_COLUMN, SINGLE_COLUMN, 4, SINGLE_ROW),
-            (ttk.Button(developer_frame, text="Set Values", command=self.pid_value_setting_callback),
-             RIGHT_COLUMN, SINGLE_COLUMN, 4, SINGLE_ROW),
+            WidgetCreationObject(ttk.Label(developer_frame, text="Select\nController"),
+                                 col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=0, row_span=DOUBLE_ROW),
+            WidgetCreationObject(Radiobutton(developer_frame, text="x-lin-trj", variable=self.pid_selector,
+                                             value=0, command=self.pid_controller_selection_callback),
+                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=0, row_span=SINGLE_ROW, ),
+            WidgetCreationObject(Radiobutton(developer_frame, text="y-lin-img", variable=self.pid_selector,
+                                             value=1, command=self.pid_controller_selection_callback),
+                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=0, row_span=SINGLE_ROW, ),
+            WidgetCreationObject(Radiobutton(developer_frame, text="z-lin-force", variable=self.pid_selector,
+                                             value=2, command=self.pid_controller_selection_callback),
+                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=0, row_span=SINGLE_ROW, ),
+            WidgetCreationObject(Radiobutton(developer_frame, text="x-ang-N/A", variable=self.pid_selector,
+                                             value=3, command=self.pid_controller_selection_callback),
+                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=1, row_span=SINGLE_ROW, ),
+            WidgetCreationObject(Radiobutton(developer_frame, text="y-ang-N/A", variable=self.pid_selector,
+                                             value=4, command=self.pid_controller_selection_callback),
+                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=1, row_span=SINGLE_ROW, ),
+            WidgetCreationObject(Radiobutton(developer_frame, text="z-ang-N/A", variable=self.pid_selector,
+                                             value=5, command=self.pid_controller_selection_callback),
+                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=1, row_span=SINGLE_ROW, ),
+            WidgetCreationObject(ttk.Label(developer_frame, text="P"),
+                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=2, row_span=SINGLE_ROW),
+            WidgetCreationObject(ttk.Label(developer_frame, text="I"),
+                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=2, row_span=SINGLE_ROW),
+            WidgetCreationObject(ttk.Label(developer_frame, text="D"),
+                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=2, row_span=SINGLE_ROW),
+            WidgetCreationObject(ttk.Label(developer_frame, text="Current Values:"),
+                                 col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=3, row_span=SINGLE_ROW),
+            WidgetCreationObject(ttk.Label(developer_frame, textvariable=self.p_gain_var),
+                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=3, row_span=SINGLE_ROW),
+            WidgetCreationObject(ttk.Label(developer_frame, textvariable=self.i_gain_var),
+                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=3, row_span=SINGLE_ROW),
+            WidgetCreationObject(ttk.Label(developer_frame, textvariable=self.d_gain_var),
+                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=3, row_span=SINGLE_ROW),
+            WidgetCreationObject(ttk.Label(developer_frame, text="Set to:"),
+                                 col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=4, row_span=SINGLE_ROW),
+            WidgetCreationObject(self.p_gain_entry,
+                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=4, row_span=SINGLE_ROW),
+            WidgetCreationObject(self.i_gain_entry,
+                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=4, row_span=SINGLE_ROW),
+            WidgetCreationObject(self.d_gain_entry,
+                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                 row_num=4, row_span=SINGLE_ROW),
+            WidgetCreationObject(
+                ttk.Button(developer_frame, text="Set Values", command=self.pid_value_setting_callback),
+                col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
+                row_num=4, row_span=SINGLE_ROW),
         ]
         # Only allow the user to save the images if the user interface is not in testing mode
         if not passed_arguments.testing_mode:
-            developer_widgets.append((self.select_image_destination_directory, L_MIDDLE_COLUMN, THREE_COLUMN,
-                                      5, SINGLE_ROW))
-            developer_widgets.append((self.save_images_button, MIDDLE_COLUMN, SINGLE_COLUMN, 6, SINGLE_ROW))
+            developer_widgets.append(WidgetCreationObject(self.select_image_destination_directory,
+                                                          col_num=L_MIDDLE_COLUMN, col_span=THREE_COLUMN,
+                                                          row_num=5, row_span=SINGLE_ROW))
+            developer_widgets.append(WidgetCreationObject(self.save_images_button,
+                                                          col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
+                                                          row_num=6, row_span=SINGLE_ROW))
 
         # endregion
 
@@ -461,7 +613,8 @@ class UserInterface(BasicNode):
             developer_widgets
         ]
         for list_of_widgets in list_of_list_of_widgets:
-            self.add_widgets(list_of_widgets)
+            for widget in list_of_widgets:
+                widget.add_widget()
 
         # Add the parent frame as the only grid object in the window
         main_content_frame.grid(column=0, row=0)
@@ -695,42 +848,39 @@ class UserInterface(BasicNode):
     def restart_image_streaming_button_callback(self):
         self.restart_image_streaming_command_publisher.publish(Bool(True))
 
-    def image_filtering_button_callback(self):
+    def image_control_button_callback(self):
         """
-        Toggles if the ultrasound images will be filtered, based on the user input.
+        Toggles if the robot will use image feedback, based on the user input.
         """
         # Get the current text of the button
-        button_text = self.image_filtering_button[WIDGET_TEXT]
+        button_text = self.image_control_button[WIDGET_TEXT]
 
         # If the button currently says "Start"
-        if button_text == START_IMAGE_FILTER:
+        if button_text == START_IMAGE_CONTROL:
 
-            # Publish the command to start filtering images
-            self.filter_images_command_publisher.publish(Bool(True))
+            # Publish the command to start using image control
+            self.use_image_feedback_command_publisher.publish(Bool(True))
 
             # Set it to say "Stop"
-            new_button_text = STOP_IMAGE_FILTER
+            new_button_text = STOP_IMAGE_CONTROL
 
-            # Set the state to be that the image is currently being filtered
-            self.currently_filtering = True
+            # Set the state to be that image control is currently being used
+            self.currently_using_image_control = True
 
         # If the button currently says "Stop"
         else:
 
             # Publish the command to stop filtering images
-            self.filter_images_command_publisher.publish(Bool(False))
+            self.use_image_feedback_command_publisher.publish(Bool(False))
 
             # Set the button to say "Stop"
-            new_button_text = START_IMAGE_FILTER
+            new_button_text = START_IMAGE_CONTROL
 
-            # Set the state to be that the image is not currently being filtered
-            self.currently_filtering = False
+            # Set the state to be that image control is not currently being used
+            self.currently_using_image_control = False
 
         # Set the new text of the button
-        self.image_filtering_button[WIDGET_TEXT] = new_button_text
-
-        # Check to see if the state of the robot command button should be toggled
-        self.robot_toggle_state_change()
+        self.image_control_button[WIDGET_TEXT] = new_button_text
 
     def force_control_button_callback(self):
         """
@@ -764,73 +914,37 @@ class UserInterface(BasicNode):
         # Set the new text of the button
         self.force_control_button[WIDGET_TEXT] = new_button_text
 
-        # Check to see if the state of the robot command button should be toggled
-        self.robot_toggle_state_change()
-
-    def allow_robot_movement_button_callback(self):
+    def balancing_control_button_callback(self):
         """
-        Toggles if the robot will move, based on user input.
+        Toggles if the robot will use balancing feedback, based on the user input.
         """
 
         # Get the current text of the button
-        button_text = self.allow_robot_movement_button[WIDGET_TEXT]
+        button_text = self.balancing_control_button[WIDGET_TEXT]
 
         # If the button currently says "Start"
-        if button_text == ENABLE_ROBOT_MOVEMENT:
+        if button_text == START_BALANCING_CONTROL:
 
             # Set it to say "Stop"
-            new_button_text = DISABLE_ROBOT_MOVEMENT
+            new_button_text = STOP_BALANCING_CONTROL
 
-            # Set the state to be that the robot is currently moving
-            self.currently_using_pose_feedback = True
+            # Set the state to be that the robot is currently using force feedback
+            self.currently_using_balancing_feedback = True
 
         # If the button currently says "Stop"
         else:
 
             # Set it to say "Start"
-            new_button_text = ENABLE_ROBOT_MOVEMENT
+            new_button_text = START_BALANCING_CONTROL
 
-            # Set the state to be that the robot is currently not moving
-            self.currently_using_pose_feedback = False
+            # Set the state to be that the robot is not currently using force_feedback
+            self.currently_using_balancing_feedback = False
 
-        # Publish the command to use pose feedback based on the button state
-        self.use_pose_feedback_command_publisher.publish(Bool(self.currently_using_pose_feedback))
+        # Publish the command to stop using force feedback
+        self.use_balancing_feedback_command_publisher.publish(Bool(self.currently_using_balancing_feedback))
 
         # Set the new text of the button
-        self.allow_robot_movement_button[WIDGET_TEXT] = new_button_text
-
-        # Toggle the state of the other buttons based on the state of the robot movement
-        self.robot_movement_toggle_other_button_states()
-
-    def robot_toggle_state_change(self):
-        """
-        Toggle the state of the robot movement button, based on the state of the image filtering and force feedback.
-        """
-
-        # If image filtering and force feedback are both on, allow the button to be clicked
-        if self.currently_filtering and self.currently_using_force_feedback:
-            self.allow_robot_movement_button[WIDGET_STATE] = NORMAL
-
-        # Otherwise, disable it
-        else:
-            self.allow_robot_movement_button[WIDGET_STATE] = DISABLED
-
-    def robot_movement_toggle_other_button_states(self):
-        """
-        Toggle the states of the image filtering and force control buttons based on the robot moving state.
-        """
-
-        # If the robot is currently moving, disable the image filtering and force control buttons
-        if self.currently_using_pose_feedback:
-            new_state = DISABLED
-
-        # If the robot is not currently moving, enable the image filtering and force control buttons
-        else:
-            new_state = NORMAL
-
-        # Set the states of the buttons
-        self.image_filtering_button[WIDGET_STATE] = new_state
-        self.force_control_button['state'] = new_state
+        self.balancing_control_button[WIDGET_TEXT] = new_button_text
 
     def pid_controller_selection_callback(self) -> None:
         """
@@ -946,7 +1060,7 @@ class UserInterface(BasicNode):
              (widget object, column position, column span, row position, row span)
         """
         for widget in list_of_widgets:
-            widget[0].grid(column=widget[1], columnspan=widget[2], row=widget[3], rowspan=widget[4])
+            widget[0].grid(column=widget[1], columnspan=widget[2], row=widget[3], rowspan=widget[4], sticky='nsew')
 
     def disable_enable_pages(self, always_visible_page: bool = None,
                              exam_setup_page: bool = None,
@@ -993,10 +1107,46 @@ class UserInterface(BasicNode):
         """
         Publishes the different commands at regular intervals.
         """
-        self.filter_images_command_publisher.publish(Bool(self.currently_filtering))
+        self.use_image_feedback_command_publisher.publish(Bool(self.currently_using_image_control))
         self.use_force_feedback_command_publisher.publish(Bool(self.currently_using_force_feedback))
         self.use_pose_feedback_command_publisher.publish(Bool(self.currently_using_pose_feedback))
-        root.after(100, self.publishing_loop)
+        self.use_balancing_feedback_command_publisher.publish(Bool(self.currently_using_balancing_feedback))
+        root.after(30, self.publishing_loop)
+
+
+# (ttk.Label(exam_setup_frame, text="Current Set-point (N):"), LEFT_COLUMN, SINGLE_COLUMN, 0, DOUBLE_ROW)
+
+
+class WidgetCreationObject:
+
+    def __init__(self, widget_object,
+                 col_num: int, col_span: int,
+                 row_num: int, row_span: int,
+                 ipadx: int = 0, ipady: int = 0,
+                 padx: int = 0, pady: int = 0,
+                 sticky: str = 'nsew'):
+        self.widget_object = widget_object
+        self.col_num = col_num
+        self.col_span = col_span
+        self.row_num = row_num
+        self.row_span = row_span
+        self.ipadx = ipadx
+        self.ipady = ipady
+        self.padx = padx
+        self.pady = pady
+        self.sticky = sticky
+
+    def add_widget(self):
+        self.widget_object.grid(column=self.col_num,
+                                columnspan=self.col_span,
+                                row=self.row_num,
+                                rowspan=self.row_span,
+                                ipadx=self.ipadx,
+                                ipady=self.ipady,
+                                padx=self.padx,
+                                pady=self.pady,
+                                sticky=self.sticky
+                                )
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ from std_msgs.msg import String, UInt8
 # Import custom ROS packages
 from thyroid_ultrasound_support.BasicNode import *
 from thyroid_ultrasound_support.TopicNames import *
+from thyroid_ultrasound_messages.msg import SaveExperimentDataCommand
 
 # Define constants used for logging purposes
 VERBOSE: int = int(0)
@@ -48,6 +49,10 @@ TEST_FORCE_CONTROL: str = "Test Force\n Profile"
 STOP_TEST_FORCE_CONTROL: str = "Stop Testing\n Force Control"
 START_SAVING_IMAGES: str = "Start\nSaving Images"
 STOP_SAVING_IMAGES: str = "Stop\nSaving Images"
+START_SENDING_OVERRIDE_VALUE: str = "Start sending\noverride value"
+STOP_SENDING_OVERRIDE_VALUE: str = "Stop sending\noverride value"
+START_SAVING_EXPERIMENT_DATA: str = "Start saving\nexperiment data"
+STOP_SAVING_EXPERIMENT_DATA: str = "Stop saving\nexperiment data"
 
 # Define constants for parameters of widgets
 WIDGET_TEXT: str = 'text'
@@ -76,6 +81,10 @@ EMPTY_STATUS: str = "STATUS: "
 # Define function mode constants
 TESTING: int = int(0)
 RUNNING: int = int(1)
+
+# Define constants for yes and no radio buttons
+YES_BUTTON: int = int(1)
+NO_BUTTON: int = int(0)
 
 
 class UserInterface(BasicNode):
@@ -125,7 +134,7 @@ class UserInterface(BasicNode):
 
         # Create a publisher to publish the command to use balancing feedback
         self.use_balancing_feedback_command_publisher = Publisher(USE_BALANCING_FEEDBACK, Bool,
-                                                              queue_size=1)
+                                                                  queue_size=1)
 
         # Create a publisher to publish the command to start and stop the robot motion
         self.stop_robot_motion_command_publisher = Publisher('/command/stop_motion', Bool, queue_size=1)
@@ -189,6 +198,13 @@ class UserInterface(BasicNode):
 
         self.send_folder_destination_publisher = Publisher(SAVED_IMAGES_DESTINATION, String, queue_size=1)
 
+        # Create a publisher to publish an override signal if the patient is in the image
+        self.patient_contact_publisher = Publisher(IMAGE_PATIENT_CONTACT, Bool, queue_size=1)
+
+        # Define command publishers for saving experiment data
+        self.save_experiment_data_command_publisher = Publisher(EXP_SAVE_DATA_COMMAND, SaveExperimentDataCommand,
+                                                                queue_size=1)
+
         # Create a subscriber to listen to the external force felt by the robot
         Subscriber(ROBOT_DERIVED_FORCE, WrenchStamped, self.robot_sensed_force_callback)
 
@@ -226,6 +242,7 @@ class UserInterface(BasicNode):
         nodule_exam_frame = ttk.Frame(tab_controller)
         status_logging_frame = ttk.Frame(tab_controller)
         developer_frame = ttk.Frame(tab_controller)
+        experimentation_frame = ttk.Frame(tab_controller)
 
         # Add the frames to the tab controller
         tab_controller.add(exam_setup_frame, text="Exam Setup")
@@ -233,6 +250,7 @@ class UserInterface(BasicNode):
         tab_controller.add(nodule_exam_frame, text="Nodule Exam")
         tab_controller.add(status_logging_frame, text="Status Logger")
         tab_controller.add(developer_frame, text="Developer")
+        tab_controller.add(experimentation_frame, text="Experimentation")
 
         # Define the widgets used in the always_visible_frame
         # region
@@ -337,10 +355,10 @@ class UserInterface(BasicNode):
             WidgetCreationObject(ttk.Label(exam_setup_frame, text="Crop the raw image?", anchor=CENTER, justify=CENTER),
                                  col_num=LEFT_COLUMN, row_num=4, row_span=DOUBLE_ROW),
             WidgetCreationObject(Radiobutton(exam_setup_frame, text="Yes", variable=self.select_image_crop_variable,
-                                             value=1, command=self.select_image_crop_callback,
+                                             value=YES_BUTTON, command=self.select_image_crop_callback,
                                              anchor=CENTER, justify=CENTER), col_num=L_MIDDLE_COLUMN, row_num=4),
             WidgetCreationObject(Radiobutton(exam_setup_frame, text="No", variable=self.select_image_crop_variable,
-                                             value=0, command=self.select_image_crop_callback,
+                                             value=NO_BUTTON, command=self.select_image_crop_callback,
                                              anchor=CENTER, justify=CENTER), col_num=MIDDLE_COLUMN, row_num=4),
             WidgetCreationObject(self.generate_new_image_cropping_button, col_num=R_MIDDLE_COLUMN, row_num=4),
             WidgetCreationObject(self.load_existing_image_cropping_button, col_num=RIGHT_COLUMN, row_num=4),
@@ -451,13 +469,16 @@ class UserInterface(BasicNode):
         # List the widgets used to populate the developer window
         # region
         self.pid_selector = IntVar()
-        self.p_gain_entry = ttk.Entry(developer_frame, validate=ALL, validatecommand=(validation_command, '%P'))
+        self.p_gain_entry = ttk.Entry(developer_frame, validate=ALL, validatecommand=(validation_command, '%P'),
+                                      justify=CENTER, width=5)
         self.p_gain_entry.insert(0, "0.000")
         self.p_gain_var = StringVar(developer_frame, "0.000")
-        self.i_gain_entry = ttk.Entry(developer_frame, validate=ALL, validatecommand=(validation_command, '%P'))
+        self.i_gain_entry = ttk.Entry(developer_frame, validate=ALL, validatecommand=(validation_command, '%P'),
+                                      justify=CENTER, width=5)
         self.i_gain_entry.insert(0, "0.000")
         self.i_gain_var = StringVar(developer_frame, "0.000")
-        self.d_gain_entry = ttk.Entry(developer_frame, validate=ALL, validatecommand=(validation_command, '%P'))
+        self.d_gain_entry = ttk.Entry(developer_frame, validate=ALL, validatecommand=(validation_command, '%P'),
+                                      justify=CENTER, width=5)
         self.d_gain_entry.insert(0, "0.000")
         self.d_gain_var = StringVar(developer_frame, "0.000")
         self.save_images_button = ttk.Button(developer_frame, text=START_SAVING_IMAGES,
@@ -468,80 +489,132 @@ class UserInterface(BasicNode):
 
         developer_widgets = [
             WidgetCreationObject(ttk.Label(developer_frame, text="Select\nController"),
-                                 col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=0, row_span=DOUBLE_ROW),
+                                 col_num=LEFT_COLUMN, row_num=0, row_span=DOUBLE_ROW),
             WidgetCreationObject(Radiobutton(developer_frame, text="x-lin-trj", variable=self.pid_selector,
                                              value=0, command=self.pid_controller_selection_callback),
-                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=0, row_span=SINGLE_ROW, ),
+                                 col_num=L_MIDDLE_COLUMN, row_num=0),
             WidgetCreationObject(Radiobutton(developer_frame, text="y-lin-img", variable=self.pid_selector,
                                              value=1, command=self.pid_controller_selection_callback),
-                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=0, row_span=SINGLE_ROW, ),
+                                 col_num=MIDDLE_COLUMN, row_num=0),
             WidgetCreationObject(Radiobutton(developer_frame, text="z-lin-force", variable=self.pid_selector,
                                              value=2, command=self.pid_controller_selection_callback),
-                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=0, row_span=SINGLE_ROW, ),
+                                 col_num=R_MIDDLE_COLUMN, row_num=0),
             WidgetCreationObject(Radiobutton(developer_frame, text="x-ang-N/A", variable=self.pid_selector,
                                              value=3, command=self.pid_controller_selection_callback),
-                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=1, row_span=SINGLE_ROW, ),
+                                 col_num=L_MIDDLE_COLUMN, row_num=1),
             WidgetCreationObject(Radiobutton(developer_frame, text="y-ang-N/A", variable=self.pid_selector,
                                              value=4, command=self.pid_controller_selection_callback),
-                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=1, row_span=SINGLE_ROW, ),
+                                 col_num=MIDDLE_COLUMN, row_num=1),
             WidgetCreationObject(Radiobutton(developer_frame, text="z-ang-N/A", variable=self.pid_selector,
                                              value=5, command=self.pid_controller_selection_callback),
-                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=1, row_span=SINGLE_ROW, ),
-            WidgetCreationObject(ttk.Label(developer_frame, text="P"),
-                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=2, row_span=SINGLE_ROW),
-            WidgetCreationObject(ttk.Label(developer_frame, text="I"),
-                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=2, row_span=SINGLE_ROW),
-            WidgetCreationObject(ttk.Label(developer_frame, text="D"),
-                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=2, row_span=SINGLE_ROW),
+                                 col_num=R_MIDDLE_COLUMN, row_num=1),
+            WidgetCreationObject(ttk.Label(developer_frame, text="P", anchor=CENTER, justify=CENTER),
+                                 col_num=L_MIDDLE_COLUMN, row_num=2),
+            WidgetCreationObject(ttk.Label(developer_frame, text="I", anchor=CENTER, justify=CENTER),
+                                 col_num=MIDDLE_COLUMN, row_num=2),
+            WidgetCreationObject(ttk.Label(developer_frame, text="D", anchor=CENTER, justify=CENTER),
+                                 col_num=R_MIDDLE_COLUMN, row_num=2),
             WidgetCreationObject(ttk.Label(developer_frame, text="Current Values:"),
-                                 col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=3, row_span=SINGLE_ROW),
-            WidgetCreationObject(ttk.Label(developer_frame, textvariable=self.p_gain_var),
-                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=3, row_span=SINGLE_ROW),
-            WidgetCreationObject(ttk.Label(developer_frame, textvariable=self.i_gain_var),
-                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=3, row_span=SINGLE_ROW),
-            WidgetCreationObject(ttk.Label(developer_frame, textvariable=self.d_gain_var),
-                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=3, row_span=SINGLE_ROW),
-            WidgetCreationObject(ttk.Label(developer_frame, text="Set to:"),
-                                 col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=4, row_span=SINGLE_ROW),
-            WidgetCreationObject(self.p_gain_entry,
-                                 col_num=L_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=4, row_span=SINGLE_ROW),
-            WidgetCreationObject(self.i_gain_entry,
-                                 col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=4, row_span=SINGLE_ROW),
-            WidgetCreationObject(self.d_gain_entry,
-                                 col_num=R_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                 row_num=4, row_span=SINGLE_ROW),
+                                 col_num=LEFT_COLUMN, row_num=3),
+            WidgetCreationObject(ttk.Label(developer_frame, textvariable=self.p_gain_var,
+                                           anchor=CENTER, justify=CENTER),
+                                 col_num=L_MIDDLE_COLUMN, row_num=3),
+            WidgetCreationObject(ttk.Label(developer_frame, textvariable=self.i_gain_var,
+                                           anchor=CENTER, justify=CENTER),
+                                 col_num=MIDDLE_COLUMN, row_num=3),
+            WidgetCreationObject(ttk.Label(developer_frame, textvariable=self.d_gain_var,
+                                           anchor=CENTER, justify=CENTER),
+                                 col_num=R_MIDDLE_COLUMN, row_num=3),
+            WidgetCreationObject(ttk.Label(developer_frame, text="Set to:"), col_num=LEFT_COLUMN, row_num=4),
+            WidgetCreationObject(self.p_gain_entry, col_num=L_MIDDLE_COLUMN, row_num=4),
+            WidgetCreationObject(self.i_gain_entry, col_num=MIDDLE_COLUMN, row_num=4),
+            WidgetCreationObject(self.d_gain_entry, col_num=R_MIDDLE_COLUMN, row_num=4),
             WidgetCreationObject(
                 ttk.Button(developer_frame, text="Set Values", command=self.pid_value_setting_callback),
-                col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
-                row_num=4, row_span=SINGLE_ROW),
+                col_num=RIGHT_COLUMN, row_num=4),
         ]
-        # Only allow the user to save the images if the user interface is not in testing mode
-        if not passed_arguments.testing_mode:
-            developer_widgets.append(WidgetCreationObject(self.select_image_destination_directory,
-                                                          col_num=L_MIDDLE_COLUMN, col_span=THREE_COLUMN,
-                                                          row_num=5, row_span=SINGLE_ROW))
-            developer_widgets.append(WidgetCreationObject(self.save_images_button,
-                                                          col_num=MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
-                                                          row_num=6, row_span=SINGLE_ROW))
 
         # endregion
+
+        # Define the widgets used to populate the experimentation window
+        self.select_patient_contact_override_variable = IntVar()
+        self.is_patient_contact_override_active = False
+        self.send_patient_contact_override_button = ttk.Button(experimentation_frame,
+                                                               text=START_SENDING_OVERRIDE_VALUE,
+                                                               command=self.send_patient_contact_override_button_callback)
+        # Define widgets used to save data about the experiment
+        self.save_robot_pose_variable = IntVar()
+        self.save_robot_pose_yes_button = ttk.Radiobutton(experimentation_frame, text="Yes", value=YES_BUTTON,
+                                                          variable=self.save_robot_pose_variable)
+        self.save_robot_pose_no_button = ttk.Radiobutton(experimentation_frame, text="No", value=NO_BUTTON,
+                                                         variable=self.save_robot_pose_variable)
+        self.save_robot_force_variable = IntVar()
+        self.save_robot_force_yes_button = ttk.Radiobutton(experimentation_frame, text="Yes", value=YES_BUTTON,
+                                                           variable=self.save_robot_force_variable)
+        self.save_robot_force_no_button = ttk.Radiobutton(experimentation_frame, text="No", value=NO_BUTTON,
+                                                          variable=self.save_robot_force_variable)
+        self.save_raw_image_variable = IntVar()
+        self.save_raw_image_yes_button = ttk.Radiobutton(experimentation_frame, text="Yes", value=YES_BUTTON,
+                                                         variable=self.save_raw_image_variable)
+        self.save_raw_image_no_button = ttk.Radiobutton(experimentation_frame, text="No", value=NO_BUTTON,
+                                                        variable=self.save_raw_image_variable)
+        self.save_image_data_objects_variable = IntVar()
+        self.save_image_data_objects_yes_button = ttk.Radiobutton(experimentation_frame, text="Yes", value=YES_BUTTON,
+                                                                  variable=self.save_image_data_objects_variable)
+        self.save_image_data_objects_no_button = ttk.Radiobutton(experimentation_frame, text="No", value=NO_BUTTON,
+                                                                 variable=self.save_image_data_objects_variable)
+        self.is_experiment_data_saving_active = False
+        self.save_experiment_data_button = ttk.Button(experimentation_frame,
+                                                      text=START_SAVING_EXPERIMENT_DATA,
+                                                      command=self.save_experiment_data_button_callback)
+
+        self.save_images_button = ttk.Button(experimentation_frame, text=START_SAVING_IMAGES,
+                                             command=self.send_image_saving_command_callback)
+        self.select_image_destination_directory = ttk.Button(experimentation_frame,
+                                                             text='Select Location\nto Save Images',
+                                                             command=self.send_save_images_destination)
+
+        experimentation_widgets = [
+            WidgetCreationObject(ttk.Label(experimentation_frame, text="Select the value to send to override\n"
+                                                                       "the calculated patient contact value",
+                                           anchor=CENTER, justify=CENTER),
+                                 col_num=LEFT_COLUMN, col_span=THREE_COLUMN, row_num=0, row_span=DOUBLE_ROW),
+            WidgetCreationObject(ttk.Radiobutton(experimentation_frame, text="In-contact", value=YES_BUTTON,
+                                                 variable=self.select_patient_contact_override_variable),
+                                 col_num=R_MIDDLE_COLUMN, row_num=0),
+            WidgetCreationObject(ttk.Radiobutton(experimentation_frame, text="Not In-contact", value=NO_BUTTON,
+                                                 variable=self.select_patient_contact_override_variable),
+                                 col_num=R_MIDDLE_COLUMN, row_num=1),
+            WidgetCreationObject(self.send_patient_contact_override_button, col_num=RIGHT_COLUMN, row_num=0,
+                                 row_span=DOUBLE_ROW),
+            WidgetCreationObject(ttk.Separator(experimentation_frame),
+                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=2, padx=0),
+            WidgetCreationObject(self.select_image_destination_directory, col_num=LEFT_COLUMN,
+                                 col_span=THREE_COLUMN, row_num=3),
+            WidgetCreationObject(self.save_images_button, col_num=R_MIDDLE_COLUMN, col_span=TWO_COLUMN, row_num=3),
+            WidgetCreationObject(ttk.Separator(experimentation_frame),
+                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=4, padx=0),
+            WidgetCreationObject(ttk.Label(experimentation_frame, text="Save\nrobot pose",
+                                           anchor=CENTER, justify=CENTER), col_num=L_MIDDLE_COLUMN, row_num=5),
+            WidgetCreationObject(self.save_robot_pose_yes_button, col_num=L_MIDDLE_COLUMN, row_num=6),
+            WidgetCreationObject(self.save_robot_pose_no_button, col_num=L_MIDDLE_COLUMN, row_num=7),
+            WidgetCreationObject(ttk.Label(experimentation_frame, text="Save\nrobot force",
+                                           anchor=CENTER, justify=CENTER), col_num=MIDDLE_COLUMN, row_num=5),
+            WidgetCreationObject(self.save_robot_force_yes_button, col_num=MIDDLE_COLUMN, row_num=6),
+            WidgetCreationObject(self.save_robot_force_no_button, col_num=MIDDLE_COLUMN, row_num=7),
+            WidgetCreationObject(ttk.Label(experimentation_frame, text="Save\nraw images",
+                                           anchor=CENTER, justify=CENTER), col_num=R_MIDDLE_COLUMN, row_num=5),
+            WidgetCreationObject(self.save_raw_image_yes_button, col_num=R_MIDDLE_COLUMN, row_num=6),
+            WidgetCreationObject(self.save_raw_image_no_button, col_num=R_MIDDLE_COLUMN, row_num=7),
+            WidgetCreationObject(ttk.Label(experimentation_frame, text="Save\nimage data",
+                                           anchor=CENTER, justify=CENTER), col_num=RIGHT_COLUMN, row_num=5),
+            WidgetCreationObject(self.save_image_data_objects_yes_button, col_num=RIGHT_COLUMN, row_num=6),
+            WidgetCreationObject(self.save_image_data_objects_no_button, col_num=RIGHT_COLUMN, row_num=7),
+            WidgetCreationObject(ttk.Label(experimentation_frame, text="Select the data to save\n" +
+                                                                       "for this experiment"),
+                                 col_num=LEFT_COLUMN, row_num=6, row_span=DOUBLE_ROW),
+            WidgetCreationObject(self.save_experiment_data_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=8)
+        ]
 
         # Add the widgets to each frame
         list_of_list_of_widgets = [
@@ -550,7 +623,8 @@ class UserInterface(BasicNode):
             self.thyroid_exam_widgets,
             self.nodule_exam_widgets,
             status_logging_widgets,
-            developer_widgets
+            developer_widgets,
+            experimentation_widgets
         ]
         for list_of_widgets in list_of_list_of_widgets:
             for widget in list_of_widgets:
@@ -949,6 +1023,62 @@ class UserInterface(BasicNode):
         self.send_folder_destination_publisher.publish(askdirectory(initialdir='/home/ben',
                                                                     title="Select destination for saved images."))
 
+    def send_patient_contact_override_button_callback(self) -> None:
+        if self.send_patient_contact_override_button[WIDGET_TEXT] == START_SENDING_OVERRIDE_VALUE:
+            self.is_patient_contact_override_active = True
+            self.send_patient_contact_override_button[WIDGET_TEXT] = STOP_SENDING_OVERRIDE_VALUE
+        elif self.send_patient_contact_override_button[WIDGET_TEXT] == STOP_SENDING_OVERRIDE_VALUE:
+            self.is_patient_contact_override_active = False
+            self.send_patient_contact_override_button[WIDGET_TEXT] = START_SENDING_OVERRIDE_VALUE
+        else:
+            raise Exception("Button text was not recognized")
+
+    def save_experiment_data_button_callback(self) -> None:
+
+        new_command_message = SaveExperimentDataCommand()
+
+        if self.save_experiment_data_button[WIDGET_TEXT] == START_SAVING_EXPERIMENT_DATA:
+            self.save_experiment_data_button[WIDGET_TEXT] = STOP_SAVING_EXPERIMENT_DATA
+            if bool(self.save_robot_pose_variable.get()):
+                new_command_message.save_pose = True
+            if bool(self.save_robot_force_variable.get()):
+                new_command_message.save_force = True
+            if bool(self.save_raw_image_variable.get()):
+                new_command_message.save_raw_image = True
+            if bool(self.save_image_data_objects_variable.get()):
+                new_command_message.save_image_data = True
+            self.save_robot_pose_yes_button[WIDGET_STATE] = DISABLED
+            self.save_robot_pose_no_button[WIDGET_STATE] = DISABLED
+            self.save_robot_force_yes_button[WIDGET_STATE] = DISABLED
+            self.save_robot_force_no_button[WIDGET_STATE] = DISABLED
+            self.save_raw_image_yes_button[WIDGET_STATE] = DISABLED
+            self.save_raw_image_no_button[WIDGET_STATE] = DISABLED
+            self.save_image_data_objects_yes_button[WIDGET_STATE] = DISABLED
+            self.save_image_data_objects_no_button[WIDGET_STATE] = DISABLED
+
+        elif self.save_experiment_data_button[WIDGET_TEXT] == STOP_SAVING_EXPERIMENT_DATA:
+            self.save_experiment_data_button[WIDGET_TEXT] = START_SAVING_EXPERIMENT_DATA
+            if bool(self.save_robot_pose_variable.get()):
+                new_command_message.save_pose = False
+            if bool(self.save_robot_force_variable.get()):
+                new_command_message.save_force = False
+            if bool(self.save_raw_image_variable.get()):
+                new_command_message.save_raw_image = False
+            if bool(self.save_image_data_objects_variable.get()):
+                new_command_message.save_image_data = False
+            self.save_robot_pose_yes_button[WIDGET_STATE] = NORMAL
+            self.save_robot_pose_no_button[WIDGET_STATE] = NORMAL
+            self.save_robot_force_yes_button[WIDGET_STATE] = NORMAL
+            self.save_robot_force_no_button[WIDGET_STATE] = NORMAL
+            self.save_raw_image_yes_button[WIDGET_STATE] = NORMAL
+            self.save_raw_image_no_button[WIDGET_STATE] = NORMAL
+            self.save_image_data_objects_yes_button[WIDGET_STATE] = NORMAL
+            self.save_image_data_objects_no_button[WIDGET_STATE] = NORMAL
+        else:
+            raise Exception("Button text was not recognized.")
+
+        self.save_experiment_data_command_publisher.publish(new_command_message)
+
     # endregion
     ############################################################################
 
@@ -1085,6 +1215,8 @@ class UserInterface(BasicNode):
         self.use_force_feedback_command_publisher.publish(Bool(self.currently_using_force_feedback))
         self.use_pose_feedback_command_publisher.publish(Bool(self.currently_using_pose_feedback))
         self.use_balancing_feedback_command_publisher.publish(Bool(self.currently_using_balancing_feedback))
+        if self.is_patient_contact_override_active:
+            self.patient_contact_publisher.publish(Bool(bool(self.select_patient_contact_override_variable.get())))
         root.after(30, self.publishing_loop)
 
 

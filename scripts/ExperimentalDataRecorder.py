@@ -6,7 +6,6 @@ File containing the ExperimentDataRecorder class.
 
 # TODO - Dream - Add proper logging through BasicNode class
 # TODO - Dream - Add proper error catching with exceptions
-# TODO - High - Record the image centroid error published by the image positioning controller
 
 # Import standard packages
 from os import mkdir
@@ -18,7 +17,7 @@ from numpy import array
 from csv import DictWriter
 
 # Import standard ROS packages
-from geometry_msgs.msg import WrenchStamped
+from geometry_msgs.msg import WrenchStamped, TwistStamped
 from thyroid_ultrasound_imaging_support.ImageData.convert_image_message_to_array import convert_image_message_to_array
 from thyroid_ultrasound_robot_control_support.Helpers.calc_rpy import calc_rpy
 from cv_bridge import CvBridge
@@ -31,18 +30,19 @@ from thyroid_ultrasound_imaging_support.Validation.date_stamp_str import date_st
 from thyroid_ultrasound_imaging_support.ImageData.ImageData import ImageData
 
 # Define constants to use when writing data to CSV files
-MESSAGE_ID: str = 'Message ID\nNumber'
-STAMP_SECS: str = 'Timestamp\n(s)'
-STAMP_NSECS: str = 'Timestamp\n(ns)'
-POSE_X: str = 'Robot Pose\nX (m)'
-POSE_Y: str = 'Robot Pose\nY (m)'
-POSE_Z: str = 'Robot Pose\nZ (m)'
-POSE_ROLL: str = 'Robot Pose\nRoll (m)'
-POSE_PITCH: str = 'Robot Pose\nPitch (m)'
-POSE_YAW: str = 'Robot Pose\nYaw (m)'
-FORCE: str = 'Force\n(N)'
+MESSAGE_ID: str = 'Message ID Number'
+STAMP_SECS: str = 'Timestamp (s)'
+STAMP_NSECS: str = 'Timestamp (ns)'
+POSE_X: str = 'Robot Pose X (m)'
+POSE_Y: str = 'Robot Pose Y (m)'
+POSE_Z: str = 'Robot Pose Z (m)'
+POSE_ROLL: str = 'Robot Pose Roll (m)'
+POSE_PITCH: str = 'Robot Pose Pitch (m)'
+POSE_YAW: str = 'Robot Pose Yaw (m)'
+FORCE: str = 'Force (N)'
 RAW_IMAGE_NAME: str = 'Raw Image Name'
 RAW_IMAGE_ARRAY: str = 'Raw Image Array'
+IMAGE_CENTROID: str = 'Centroid Error in X (m)'
 
 
 class ExperimentDataRecorder(BasicNode):
@@ -78,6 +78,7 @@ class ExperimentDataRecorder(BasicNode):
         self.record_force = False
         self.record_raw_image = False
         self.record_image_data_objects = False
+        self.record_image_centroid = False
 
         # Define variables to save where each kind of data is saved
         self.pose_file = None
@@ -86,21 +87,24 @@ class ExperimentDataRecorder(BasicNode):
         self.force_file_writer = None
         self.raw_image_folder = None
         self.image_data_objects_folder = None
+        self.image_centroid_file = None
+        self.image_centroid_file_writer = None
 
         # Define variables to store the data that has not been recorded yet
         self.pose_queue = []
         self.force_queue = []
         self.raw_image_queue = []
         self.image_data_object_queue = []
+        self.image_centroid_queue = []
 
         # Create the node
         init_node(EXPERIMENT_DATA_RECORDER)
 
         # Define custom behaviour for the node when it shuts down
-        on_shutdown(self.shutdown_node)
+        on_shutdown(self.close_open_documents)
 
         # Define the command subscribers
-        Subscriber(EXP_SAVE_DATA_COMMAND, SaveExperimentDataCommand, self.save_robot_pose_command_callback)
+        Subscriber(EXP_SAVE_DATA_COMMAND, SaveExperimentDataCommand, self.save_data_command_callback)
 
         # Create a subscriber for the robot pose
         Subscriber(ROBOT_DERIVED_POSE, Float64MultiArrayStamped, self.robot_pose_callback)
@@ -114,7 +118,10 @@ class ExperimentDataRecorder(BasicNode):
         # Create a subscriber for the image data objects
         Subscriber(IMAGE_FILTERED, image_data_message, self.image_data_object_callback)
 
-    def save_robot_pose_command_callback(self, data: SaveExperimentDataCommand):
+        # Create a subscriber for the image centroid error
+        Subscriber(RC_IMAGE_ERROR, TwistStamped, self.image_centroid_callback)
+
+    def save_data_command_callback(self, data: SaveExperimentDataCommand):
         """
         Selects which data should be saved based on the fields of the message.
 
@@ -125,7 +132,7 @@ class ExperimentDataRecorder(BasicNode):
         """
 
         # If any the command has been sent to save any data,
-        if data.save_pose or data.save_force or data.save_raw_image or data.save_image_data:
+        if data.save_pose or data.save_force or data.save_raw_image or data.save_image_data or data.save_image_centroid:
 
             # Generate a new data stamp
             date_stamp = date_stamp_str(suffix="")
@@ -142,6 +149,7 @@ class ExperimentDataRecorder(BasicNode):
                                                    fieldnames=[MESSAGE_ID, STAMP_SECS, STAMP_NSECS,
                                                                POSE_X, POSE_Y, POSE_Z,
                                                                POSE_ROLL, POSE_PITCH, POSE_YAW])
+                self.pose_file_writer.writeheader()
 
                 # Update the flag that the data needs to be saved
                 self.record_pose = data.save_pose
@@ -152,6 +160,7 @@ class ExperimentDataRecorder(BasicNode):
                 self.force_file = open(self.current_folder_path + 'Force_' + date_stamp + '.csv', mode='w')
                 self.force_file_writer = DictWriter(self.force_file, delimiter=',',
                                                     fieldnames=[MESSAGE_ID, STAMP_SECS, STAMP_NSECS, FORCE])
+                self.force_file_writer.writeheader()
 
                 # Update the flag that the data needs to be stored
                 self.record_force = data.save_force
@@ -174,6 +183,17 @@ class ExperimentDataRecorder(BasicNode):
                 # Update the flag that the data needs to be stored
                 self.record_image_data_objects = data.save_image_data
 
+            if data.save_image_centroid:
+                # Create a file to save the data in
+                self.image_centroid_file = open(self.current_folder_path + 'Centroid_' + date_stamp + '.csv', mode='w')
+                self.image_centroid_file_writer = DictWriter(self.image_centroid_file, delimiter=',',
+                                                             fieldnames=[MESSAGE_ID, STAMP_SECS, STAMP_NSECS,
+                                                                         IMAGE_CENTROID])
+                self.image_centroid_file_writer.writeheader()
+
+                # Update the flag that data needs to be stored
+                self.record_image_centroid = data.save_image_centroid
+
             # Update that new data is now being recorded
             self.actively_recording_data = True
 
@@ -184,10 +204,7 @@ class ExperimentDataRecorder(BasicNode):
             self.actively_recording_data = False
 
             # Close all open documents
-            if self.pose_file is not None:
-                self.pose_file.close()
-            if self.force_file is not None:
-                self.force_file.close()
+            self.close_open_documents()
 
     def robot_pose_callback(self, message: Float64MultiArrayStamped):
         """
@@ -221,7 +238,7 @@ class ExperimentDataRecorder(BasicNode):
 
     def robot_force_callback(self, message: WrenchStamped):
         """
-        Saves the measured force of the robot in the Z axis.
+        Adds the measured force of the robot in the Z axis to the appropriate queue.
 
         Parameters
         ----------
@@ -238,7 +255,7 @@ class ExperimentDataRecorder(BasicNode):
 
     def raw_image_callback(self, message: Image):
         """
-        Saves the image captured by the ultrasound probe.
+        Adds the image captured by the ultrasound probe to the appropriate queue.
 
         Parameters
         ----------
@@ -255,7 +272,7 @@ class ExperimentDataRecorder(BasicNode):
 
     def image_data_object_callback(self, message: image_data_message):
         """
-        Saves the filtered image data objects.
+        Adds the filtered image data objects to the appropriate queue.
 
         Parameters
         ----------
@@ -267,15 +284,34 @@ class ExperimentDataRecorder(BasicNode):
             # Append the new data to the queue
             self.image_data_object_queue.append(ImageData(image_data_msg=message))
 
-    def shutdown_node(self):
+    def image_centroid_callback(self, message: TwistStamped):
         """
-        Closes any open files before shutting down the node.
+        Adds the error of the image centroid to the appropriate queue as distance in the X axis.
+
+        Parameters
+        ----------
+        message
+            A TwistStamped message containing the error of the image_centroid from the center of the image in meters.
+        """
+        # If image centroid data is being recorded
+        if self.record_image_centroid:
+            # Append the new data to the queue
+            self.image_centroid_queue.append({MESSAGE_ID: message.header.seq,
+                                              STAMP_SECS: message.header.stamp.secs,
+                                              STAMP_NSECS: message.header.stamp.nsecs,
+                                              IMAGE_CENTROID: message.twist.linear.x})
+
+    def close_open_documents(self):
+        """
+        Closes any open files.
         """
         # Close all open documents
         if self.pose_file is not None:
             self.pose_file.close()
         if self.force_file is not None:
             self.force_file.close()
+        if self.image_centroid_file is not None:
+            self.image_centroid_file.close()
 
     def main_loop(self):
         """
@@ -302,6 +338,10 @@ class ExperimentDataRecorder(BasicNode):
                 # Save the image data object to the folder
                 temp_image_data_object: ImageData = self.image_data_object_queue.pop(-1)
                 temp_image_data_object.save_object_to_file(self.image_data_objects_folder)
+            # If the image centroid is being recorded and there is new data to record
+            if self.record_image_centroid and len(self.image_centroid_queue) > 0:
+                # Write the image centroid to the file
+                self.image_centroid_file_writer.writerow(self.image_centroid_queue.pop(-1))
 
 
 if __name__ == '__main__':

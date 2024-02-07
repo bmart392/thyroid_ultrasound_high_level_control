@@ -7,8 +7,6 @@ File containing UserInterface class.
 # TODO - High - Add control for overall speed of the robot
 # TODO - Medium - Add robot controls to allow the user to move the robot around and override the image segmentation
 # TODO - Medium - Change topic names to use constants from topics files
-# TODO - High - When a scan button is pushed, it sends the create trajectory signal and the use pose feedback signal, it also activates the pose control button and changes the text to say Stop Pose Control
-# TODO - High - When the Stop pose control button is pressed, it sends a clear trajectory signal and a stop using pose feedback signal, it also deactivates the pose control button and changes the text to stay Start Pose control
 
 # Import standard packages
 from tkinter import *
@@ -53,25 +51,32 @@ START_SENDING_OVERRIDE_VALUE: str = "Start sending\noverride value"
 STOP_SENDING_OVERRIDE_VALUE: str = "Stop sending\noverride value"
 START_SAVING_EXPERIMENT_DATA: str = "Start saving\nexperiment data"
 STOP_SAVING_EXPERIMENT_DATA: str = "Stop saving\nexperiment data"
+START_CREATING_NOISE: str = "Start creating\nvelocity noise"
+STOP_CREATING_VELOCITY_NOISE: str = "Stop creating\nvelocity noise"
 
 # Define constants for parameters of widgets
 WIDGET_TEXT: str = 'text'
 WIDGET_STATE: str = 'state'
 
 # Define grid geometry constants
-FULL_WIDTH: int = int(6)
-THREE_COLUMN: int = int(3)
-TWO_COLUMN: int = int(2)
+LEFT_COLUMN: int = int(0)
+LL_MIDDLE_COLUMN: int = int(1)
+L_MIDDLE_COLUMN: int = int(2)
+LR_MIDDLE_COLUMN: int = int(3)
+MIDDLE_COLUMN: int = int(4)
+RL_MIDDLE_COLUMN: int = int(5)
+R_MIDDLE_COLUMN: int = int(6)
+RR_MIDDLE_COLUMN: int = int(7)
+RIGHT_COLUMN: int = int(8)
 
 SINGLE_COLUMN: int = int(1)
-LEFT_COLUMN: int = int(0)
-L_MIDDLE_COLUMN: int = int(2)
-MIDDLE_COLUMN: int = int(3)
-R_MIDDLE_COLUMN: int = int(4)
-RIGHT_COLUMN: int = int(5)
+TWO_COLUMN: int = int(2)
+THREE_COLUMN: int = int(3)
+FULL_WIDTH: int = int(9)
 
 SINGLE_ROW: int = int(1)
 DOUBLE_ROW: int = int(2)
+TRIPLE_ROT: int = int(3)
 
 GRAPHICS_WINDOW: int = int(3)
 
@@ -100,6 +105,8 @@ class UserInterface(BasicNode):
         parser = ArgumentParser()
         parser.add_argument("--testing_mode", "--tm", dest="testing_mode", action="store_true", default=False,
                             help="Functionality of the GUI")
+        parser.add_argument("--experimentation_mode", "--em", dest="experimentation_mode", action="store_true",
+                            default=False, help="Functionality of the GUI")
         parser.add_argument("__name", default="")
         parser.add_argument("__log", default="")
 
@@ -205,6 +212,9 @@ class UserInterface(BasicNode):
         self.save_experiment_data_command_publisher = Publisher(EXP_SAVE_DATA_COMMAND, SaveExperimentDataCommand,
                                                                 queue_size=1)
 
+        # Define a command to start publishing random velocity noise
+        self.create_noise_command_publisher = Publisher(EXP_CREATE_NOISE_COMMAND, Bool, queue_size=1)
+
         # Create a subscriber to listen to the external force felt by the robot
         Subscriber(ROBOT_DERIVED_FORCE, WrenchStamped, self.robot_sensed_force_callback)
 
@@ -249,8 +259,10 @@ class UserInterface(BasicNode):
         tab_controller.add(thyroid_exam_frame, text="Thyroid Exam")
         tab_controller.add(nodule_exam_frame, text="Nodule Exam")
         tab_controller.add(status_logging_frame, text="Status Logger")
-        tab_controller.add(developer_frame, text="Developer")
-        tab_controller.add(experimentation_frame, text="Experimentation")
+        if passed_arguments.experimentation_mode:
+            tab_controller.add(developer_frame, text="Developer")
+        if passed_arguments.experimentation_mode:
+            tab_controller.add(experimentation_frame, text="Experimentation")
 
         # Define the widgets used in the always_visible_frame
         # region
@@ -537,12 +549,17 @@ class UserInterface(BasicNode):
         # endregion
 
         # Define the widgets used to populate the experimentation window
+        # region
         self.select_patient_contact_override_variable = IntVar()
         self.is_patient_contact_override_active = False
         self.send_patient_contact_override_button = ttk.Button(experimentation_frame,
                                                                text=START_SENDING_OVERRIDE_VALUE,
                                                                command=self.send_patient_contact_override_button_callback)
-        # Define widgets used to save data about the experiment
+        self.save_images_button = ttk.Button(experimentation_frame, text=START_SAVING_IMAGES,
+                                             command=self.send_image_saving_command_callback)
+        self.select_image_destination_directory = ttk.Button(experimentation_frame,
+                                                             text='Select Location\nto Save Images',
+                                                             command=self.send_save_images_destination)
         self.save_robot_pose_variable = IntVar()
         self.save_robot_pose_yes_button = ttk.Radiobutton(experimentation_frame, text="Yes", value=YES_BUTTON,
                                                           variable=self.save_robot_pose_variable)
@@ -563,16 +580,17 @@ class UserInterface(BasicNode):
                                                                   variable=self.save_image_data_objects_variable)
         self.save_image_data_objects_no_button = ttk.Radiobutton(experimentation_frame, text="No", value=NO_BUTTON,
                                                                  variable=self.save_image_data_objects_variable)
+        self.save_image_centroid_variable = IntVar()
+        self.save_image_centroid_yes_button = ttk.Radiobutton(experimentation_frame, text="Yes", value=YES_BUTTON,
+                                                              variable=self.save_image_centroid_variable)
+        self.save_image_centroid_no_button = ttk.Radiobutton(experimentation_frame, text="No", value=NO_BUTTON,
+                                                             variable=self.save_image_centroid_variable)
         self.is_experiment_data_saving_active = False
         self.save_experiment_data_button = ttk.Button(experimentation_frame,
                                                       text=START_SAVING_EXPERIMENT_DATA,
                                                       command=self.save_experiment_data_button_callback)
-
-        self.save_images_button = ttk.Button(experimentation_frame, text=START_SAVING_IMAGES,
-                                             command=self.send_image_saving_command_callback)
-        self.select_image_destination_directory = ttk.Button(experimentation_frame,
-                                                             text='Select Location\nto Save Images',
-                                                             command=self.send_save_images_destination)
+        self.create_noise_button = ttk.Button(experimentation_frame, text=START_CREATING_NOISE,
+                                              command=self.create_noise_button_callback)
 
         experimentation_widgets = [
             WidgetCreationObject(ttk.Label(experimentation_frame, text="Select the value to send to override\n"
@@ -594,6 +612,9 @@ class UserInterface(BasicNode):
             WidgetCreationObject(self.save_images_button, col_num=R_MIDDLE_COLUMN, col_span=TWO_COLUMN, row_num=3),
             WidgetCreationObject(ttk.Separator(experimentation_frame),
                                  col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=4, padx=0),
+            WidgetCreationObject(ttk.Label(experimentation_frame,
+                                           text="Select the data\nto save for\nthis experiment", anchor=CENTER),
+                                 col_num=LEFT_COLUMN, row_num=5, row_span=3),
             WidgetCreationObject(ttk.Label(experimentation_frame, text="Save\nrobot pose",
                                            anchor=CENTER, justify=CENTER), col_num=L_MIDDLE_COLUMN, row_num=5),
             WidgetCreationObject(self.save_robot_pose_yes_button, col_num=L_MIDDLE_COLUMN, row_num=6),
@@ -607,14 +628,20 @@ class UserInterface(BasicNode):
             WidgetCreationObject(self.save_raw_image_yes_button, col_num=R_MIDDLE_COLUMN, row_num=6),
             WidgetCreationObject(self.save_raw_image_no_button, col_num=R_MIDDLE_COLUMN, row_num=7),
             WidgetCreationObject(ttk.Label(experimentation_frame, text="Save\nimage data",
+                                           anchor=CENTER, justify=CENTER), col_num=RR_MIDDLE_COLUMN, row_num=5),
+            WidgetCreationObject(self.save_image_data_objects_yes_button, col_num=RR_MIDDLE_COLUMN, row_num=6),
+            WidgetCreationObject(self.save_image_data_objects_no_button, col_num=RR_MIDDLE_COLUMN, row_num=7),
+            WidgetCreationObject(ttk.Label(experimentation_frame, text="Save image\ncentroid",
                                            anchor=CENTER, justify=CENTER), col_num=RIGHT_COLUMN, row_num=5),
-            WidgetCreationObject(self.save_image_data_objects_yes_button, col_num=RIGHT_COLUMN, row_num=6),
-            WidgetCreationObject(self.save_image_data_objects_no_button, col_num=RIGHT_COLUMN, row_num=7),
-            WidgetCreationObject(ttk.Label(experimentation_frame, text="Select the data to save\n" +
-                                                                       "for this experiment"),
-                                 col_num=LEFT_COLUMN, row_num=6, row_span=DOUBLE_ROW),
-            WidgetCreationObject(self.save_experiment_data_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=8)
+            WidgetCreationObject(self.save_image_centroid_yes_button, col_num=RIGHT_COLUMN, row_num=6),
+            WidgetCreationObject(self.save_image_centroid_no_button, col_num=RIGHT_COLUMN, row_num=7),
+            WidgetCreationObject(self.save_experiment_data_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=8),
+            WidgetCreationObject(ttk.Separator(experimentation_frame),
+                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=9, padx=0),
+            WidgetCreationObject(self.create_noise_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=10)
         ]
+
+        # endregion
 
         # Add the widgets to each frame
         list_of_list_of_widgets = [
@@ -1047,6 +1074,8 @@ class UserInterface(BasicNode):
                 new_command_message.save_raw_image = True
             if bool(self.save_image_data_objects_variable.get()):
                 new_command_message.save_image_data = True
+            if bool(self.save_image_centroid_variable.get()):
+                new_command_message.save_image_centroid = True
             self.save_robot_pose_yes_button[WIDGET_STATE] = DISABLED
             self.save_robot_pose_no_button[WIDGET_STATE] = DISABLED
             self.save_robot_force_yes_button[WIDGET_STATE] = DISABLED
@@ -1055,17 +1084,11 @@ class UserInterface(BasicNode):
             self.save_raw_image_no_button[WIDGET_STATE] = DISABLED
             self.save_image_data_objects_yes_button[WIDGET_STATE] = DISABLED
             self.save_image_data_objects_no_button[WIDGET_STATE] = DISABLED
+            self.save_image_centroid_yes_button[WIDGET_STATE] = DISABLED
+            self.save_image_centroid_no_button[WIDGET_STATE] = DISABLED
 
         elif self.save_experiment_data_button[WIDGET_TEXT] == STOP_SAVING_EXPERIMENT_DATA:
             self.save_experiment_data_button[WIDGET_TEXT] = START_SAVING_EXPERIMENT_DATA
-            if bool(self.save_robot_pose_variable.get()):
-                new_command_message.save_pose = False
-            if bool(self.save_robot_force_variable.get()):
-                new_command_message.save_force = False
-            if bool(self.save_raw_image_variable.get()):
-                new_command_message.save_raw_image = False
-            if bool(self.save_image_data_objects_variable.get()):
-                new_command_message.save_image_data = False
             self.save_robot_pose_yes_button[WIDGET_STATE] = NORMAL
             self.save_robot_pose_no_button[WIDGET_STATE] = NORMAL
             self.save_robot_force_yes_button[WIDGET_STATE] = NORMAL
@@ -1074,10 +1097,23 @@ class UserInterface(BasicNode):
             self.save_raw_image_no_button[WIDGET_STATE] = NORMAL
             self.save_image_data_objects_yes_button[WIDGET_STATE] = NORMAL
             self.save_image_data_objects_no_button[WIDGET_STATE] = NORMAL
+            self.save_image_centroid_yes_button[WIDGET_STATE] = NORMAL
+            self.save_image_centroid_no_button[WIDGET_STATE] = NORMAL
         else:
             raise Exception("Button text was not recognized.")
 
         self.save_experiment_data_command_publisher.publish(new_command_message)
+
+    def create_noise_button_callback(self) -> None:
+
+        if self.create_noise_button[WIDGET_TEXT] == START_CREATING_NOISE:
+            self.create_noise_command_publisher.publish(Bool(True))
+            self.create_noise_button[WIDGET_TEXT] = STOP_CREATING_VELOCITY_NOISE
+        elif self.create_noise_button[WIDGET_TEXT] == STOP_CREATING_VELOCITY_NOISE:
+            self.create_noise_command_publisher.publish(Bool(False))
+            self.create_noise_button[WIDGET_TEXT] = START_CREATING_NOISE
+        else:
+            raise Exception("Button text was not recognized.")
 
     # endregion
     ############################################################################

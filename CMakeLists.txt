@@ -162,6 +162,8 @@ catkin_package(
 catkin_install_python(PROGRAMS
   scripts/UserInterface.py
   scripts/ControllerTuningGraphsNode.py
+  scripts/ExperimentalDataRecorder.py
+  scripts/ExperimentNoiseMaker.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

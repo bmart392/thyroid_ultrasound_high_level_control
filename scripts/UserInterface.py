@@ -22,7 +22,7 @@ from std_msgs.msg import String, UInt8
 # Import custom ROS packages
 from thyroid_ultrasound_support.BasicNode import *
 from thyroid_ultrasound_support.TopicNames import *
-from thyroid_ultrasound_messages.msg import SaveExperimentDataCommand
+from thyroid_ultrasound_messages.msg import SaveExperimentDataCommand, RegisteredDataMsg
 
 # Define constants used for logging purposes
 VERBOSE: int = int(0)
@@ -49,10 +49,14 @@ START_SAVING_IMAGES: str = "Start\nSaving Images"
 STOP_SAVING_IMAGES: str = "Stop\nSaving Images"
 START_SENDING_OVERRIDE_VALUE: str = "Start sending\noverride value"
 STOP_SENDING_OVERRIDE_VALUE: str = "Stop sending\noverride value"
+START_SENDING_REGISTERED_DATA_OVERRIDE_VALUE: str = "Start sending registered data override value"
+STOP_SENDING_REGISTERED_DATA_OVERRIDE_VALUE: str = "Stop sending registered data override value"
 START_SAVING_EXPERIMENT_DATA: str = "Start saving\nexperiment data"
 STOP_SAVING_EXPERIMENT_DATA: str = "Stop saving\nexperiment data"
-START_CREATING_NOISE: str = "Start creating\nvelocity noise"
+START_CREATING_VELOCITY_NOISE: str = "Start creating\nvelocity noise"
 STOP_CREATING_VELOCITY_NOISE: str = "Stop creating\nvelocity noise"
+
+
 
 # Define constants for parameters of widgets
 WIDGET_TEXT: str = 'text'
@@ -208,12 +212,24 @@ class UserInterface(BasicNode):
         # Create a publisher to publish an override signal if the patient is in the image
         self.patient_contact_publisher = Publisher(IMAGE_PATIENT_CONTACT, Bool, queue_size=1)
 
+        # Create a publisher to publish an override signal for the registered data
+        self.registered_data_publisher = Publisher(REGISTERED_DATA_REAL_TIME, RegisteredDataMsg, queue_size=1)
+
         # Define command publishers for saving experiment data
         self.save_experiment_data_command_publisher = Publisher(EXP_SAVE_DATA_COMMAND, SaveExperimentDataCommand,
                                                                 queue_size=1)
 
         # Define a command to start publishing random velocity noise
         self.create_noise_command_publisher = Publisher(EXP_CREATE_NOISE_COMMAND, Bool, queue_size=1)
+
+        # Define a publisher for publishing the location in which to save registered data
+        self.registered_data_save_location_publisher = Publisher(REGISTERED_DATA_SAVE_LOCATION, String, queue_size=1)
+
+        # Define a publisher for publishing the location from which to load registered data
+        self.registered_data_load_location_publisher = Publisher(REGISTERED_DATA_LOAD_LOCATION, String, queue_size=1)
+
+        # Define a publisher for publishing the location in which to save volume data
+        self.volume_data_save_location_publisher = Publisher(VOLUME_DATA_SAVE_LOCATION, String, queue_size=1)
 
         # Create a subscriber to listen to the external force felt by the robot
         Subscriber(ROBOT_DERIVED_FORCE, WrenchStamped, self.robot_sensed_force_callback)
@@ -408,6 +424,22 @@ class UserInterface(BasicNode):
         self.scan_distance_entry = Entry(thyroid_exam_frame, validate=ALL, validatecommand=(validation_command, '%P'),
                                          justify=CENTER, width=5)
         self.scan_distance_entry.insert(0, '6.0')
+        self.registered_data_save_location_button = ttk.Button(thyroid_exam_frame,
+                                                               text='Select Location to Save Exam Data',
+                                                               command=self.registered_data_save_location_button_callback)
+        self.registered_data_save_location_str_var = StringVar(thyroid_exam_frame,
+                                                               "/home/ben/thyroid_ultrasound_data/testing_and_validation/registered_data")
+        self.registered_data_load_location_button = ttk.Button(thyroid_exam_frame,
+                                                               text='Select Data to Generate Volume',
+                                                               command=self.registered_data_load_location_button_callback)
+        self.registered_data_load_location_str_var = StringVar(thyroid_exam_frame,
+                                                               self.registered_data_save_location_str_var.get())
+        self.volume_data_save_location_button = ttk.Button(thyroid_exam_frame,
+                                                           text='Select Location to Save Volume Data',
+                                                           command=self.volume_data_save_location_button_callback)
+        self.volume_data_save_location_str_var = StringVar(thyroid_exam_frame,
+                                                           "/home/ben/thyroid_ultrasound_data/testing_and_validation/volume_data")
+
         self.complete_full_scan_button = ttk.Button(thyroid_exam_frame,
                                                     text="Complete\n Full Scan",
                                                     command=self.complete_full_scan_button_callback,
@@ -428,6 +460,33 @@ class UserInterface(BasicNode):
                                  col_num=R_MIDDLE_COLUMN, row_num=0),
             WidgetCreationObject(self.scan_negative_button,
                                  col_num=RIGHT_COLUMN, row_num=0),
+            WidgetCreationObject(ttk.Separator(thyroid_exam_frame),
+                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=1),
+            WidgetCreationObject(self.registered_data_save_location_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                 row_num=2),
+            WidgetCreationObject(ttk.Label(thyroid_exam_frame, text="Selected Location:"), col_num=LEFT_COLUMN,
+                                 col_span=TWO_COLUMN, row_num=3),
+            WidgetCreationObject(ttk.Label(thyroid_exam_frame, textvariable=self.registered_data_save_location_str_var),
+                                 col_num=L_MIDDLE_COLUMN, col_span=FULL_WIDTH - TWO_COLUMN, row_num=3),
+            WidgetCreationObject(ttk.Separator(thyroid_exam_frame), col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                 row_num=4),
+            WidgetCreationObject(self.registered_data_load_location_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                 row_num=5),
+            WidgetCreationObject(ttk.Label(thyroid_exam_frame, text='Selected Location:'), col_num=LEFT_COLUMN,
+                                 col_span=TWO_COLUMN, row_num=6),
+            WidgetCreationObject(ttk.Label(thyroid_exam_frame, textvariable=self.registered_data_load_location_str_var),
+                                 col_num=L_MIDDLE_COLUMN, col_span=FULL_WIDTH - TWO_COLUMN, row_num=6),
+            WidgetCreationObject(ttk.Separator(thyroid_exam_frame), col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                 row_num=7),
+            WidgetCreationObject(self.volume_data_save_location_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                 row_num=8),
+            WidgetCreationObject(ttk.Label(thyroid_exam_frame, text="Selected Location:"), col_num=LEFT_COLUMN,
+                                 col_span=TWO_COLUMN, row_num=9),
+            WidgetCreationObject(ttk.Label(thyroid_exam_frame, textvariable=self.volume_data_save_location_str_var),
+                                 col_num=L_MIDDLE_COLUMN, col_span=FULL_WIDTH - TWO_COLUMN, row_num=9),
+            WidgetCreationObject(ttk.Button(thyroid_exam_frame, text='Generate Volume',
+                                            command=self.generate_volume_button_callback), col_num=LEFT_COLUMN,
+                                 col_span=FULL_WIDTH, row_num=10)
             # WidgetCreationObject(self.complete_full_scan_button,
             #                      col_num=RIGHT_COLUMN, col_span=SINGLE_COLUMN,
             #                      row_num=1, row_span=DOUBLE_ROW),
@@ -520,30 +579,32 @@ class UserInterface(BasicNode):
             WidgetCreationObject(Radiobutton(developer_frame, text="z-ang-N/A", variable=self.pid_selector,
                                              value=5, command=self.pid_controller_selection_callback),
                                  col_num=R_MIDDLE_COLUMN, row_num=1),
+            WidgetCreationObject(ttk.Separator(developer_frame),
+                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=2, padx=0),
             WidgetCreationObject(ttk.Label(developer_frame, text="P", anchor=CENTER, justify=CENTER),
-                                 col_num=L_MIDDLE_COLUMN, row_num=2),
+                                 col_num=L_MIDDLE_COLUMN, row_num=3),
             WidgetCreationObject(ttk.Label(developer_frame, text="I", anchor=CENTER, justify=CENTER),
-                                 col_num=MIDDLE_COLUMN, row_num=2),
+                                 col_num=MIDDLE_COLUMN, row_num=3),
             WidgetCreationObject(ttk.Label(developer_frame, text="D", anchor=CENTER, justify=CENTER),
-                                 col_num=R_MIDDLE_COLUMN, row_num=2),
+                                 col_num=R_MIDDLE_COLUMN, row_num=3),
             WidgetCreationObject(ttk.Label(developer_frame, text="Current Values:"),
-                                 col_num=LEFT_COLUMN, row_num=3),
+                                 col_num=LEFT_COLUMN, row_num=4),
             WidgetCreationObject(ttk.Label(developer_frame, textvariable=self.p_gain_var,
                                            anchor=CENTER, justify=CENTER),
-                                 col_num=L_MIDDLE_COLUMN, row_num=3),
+                                 col_num=L_MIDDLE_COLUMN, row_num=4),
             WidgetCreationObject(ttk.Label(developer_frame, textvariable=self.i_gain_var,
                                            anchor=CENTER, justify=CENTER),
-                                 col_num=MIDDLE_COLUMN, row_num=3),
+                                 col_num=MIDDLE_COLUMN, row_num=4),
             WidgetCreationObject(ttk.Label(developer_frame, textvariable=self.d_gain_var,
                                            anchor=CENTER, justify=CENTER),
-                                 col_num=R_MIDDLE_COLUMN, row_num=3),
-            WidgetCreationObject(ttk.Label(developer_frame, text="Set to:"), col_num=LEFT_COLUMN, row_num=4),
-            WidgetCreationObject(self.p_gain_entry, col_num=L_MIDDLE_COLUMN, row_num=4),
-            WidgetCreationObject(self.i_gain_entry, col_num=MIDDLE_COLUMN, row_num=4),
-            WidgetCreationObject(self.d_gain_entry, col_num=R_MIDDLE_COLUMN, row_num=4),
+                                 col_num=R_MIDDLE_COLUMN, row_num=4),
+            WidgetCreationObject(ttk.Label(developer_frame, text="Set to:"), col_num=LEFT_COLUMN, row_num=5),
+            WidgetCreationObject(self.p_gain_entry, col_num=L_MIDDLE_COLUMN, row_num=5),
+            WidgetCreationObject(self.i_gain_entry, col_num=MIDDLE_COLUMN, row_num=5),
+            WidgetCreationObject(self.d_gain_entry, col_num=R_MIDDLE_COLUMN, row_num=5),
             WidgetCreationObject(
                 ttk.Button(developer_frame, text="Set Values", command=self.pid_value_setting_callback),
-                col_num=RIGHT_COLUMN, row_num=4),
+                col_num=RIGHT_COLUMN, row_num=5),
         ]
 
         # endregion
@@ -555,6 +616,10 @@ class UserInterface(BasicNode):
         self.send_patient_contact_override_button = ttk.Button(experimentation_frame,
                                                                text=START_SENDING_OVERRIDE_VALUE,
                                                                command=self.send_patient_contact_override_button_callback)
+        self.is_registered_data_override_active = False
+        self.send_registered_data_override_button = ttk.Button(experimentation_frame,
+                                                               text=START_SENDING_REGISTERED_DATA_OVERRIDE_VALUE,
+                                                               command=self.send_registered_data_override_button_callback)
         self.save_images_button = ttk.Button(experimentation_frame, text=START_SAVING_IMAGES,
                                              command=self.send_image_saving_command_callback)
         self.select_image_destination_directory = ttk.Button(experimentation_frame,
@@ -589,7 +654,7 @@ class UserInterface(BasicNode):
         self.save_experiment_data_button = ttk.Button(experimentation_frame,
                                                       text=START_SAVING_EXPERIMENT_DATA,
                                                       command=self.save_experiment_data_button_callback)
-        self.create_noise_button = ttk.Button(experimentation_frame, text=START_CREATING_NOISE,
+        self.create_noise_button = ttk.Button(experimentation_frame, text=START_CREATING_VELOCITY_NOISE,
                                               command=self.create_noise_button_callback)
 
         experimentation_widgets = [
@@ -607,38 +672,42 @@ class UserInterface(BasicNode):
                                  row_span=DOUBLE_ROW),
             WidgetCreationObject(ttk.Separator(experimentation_frame),
                                  col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=2, padx=0),
-            WidgetCreationObject(self.select_image_destination_directory, col_num=LEFT_COLUMN,
-                                 col_span=THREE_COLUMN, row_num=3),
-            WidgetCreationObject(self.save_images_button, col_num=R_MIDDLE_COLUMN, col_span=TWO_COLUMN, row_num=3),
+            WidgetCreationObject(self.send_registered_data_override_button, col_num=LEFT_COLUMN, row_num=3,
+                                 col_span=FULL_WIDTH),
             WidgetCreationObject(ttk.Separator(experimentation_frame),
-                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=4, padx=0),
+                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=5, padx=0),
+            WidgetCreationObject(self.select_image_destination_directory, col_num=LEFT_COLUMN,
+                                 col_span=THREE_COLUMN, row_num=6),
+            WidgetCreationObject(self.save_images_button, col_num=R_MIDDLE_COLUMN, col_span=TWO_COLUMN, row_num=6),
+            WidgetCreationObject(ttk.Separator(experimentation_frame),
+                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=7, padx=0),
             WidgetCreationObject(ttk.Label(experimentation_frame,
                                            text="Select the data\nto save for\nthis experiment", anchor=CENTER),
-                                 col_num=LEFT_COLUMN, row_num=5, row_span=3),
+                                 col_num=LEFT_COLUMN, row_num=8, row_span=3),
             WidgetCreationObject(ttk.Label(experimentation_frame, text="Save\nrobot pose",
-                                           anchor=CENTER, justify=CENTER), col_num=L_MIDDLE_COLUMN, row_num=5),
-            WidgetCreationObject(self.save_robot_pose_yes_button, col_num=L_MIDDLE_COLUMN, row_num=6),
-            WidgetCreationObject(self.save_robot_pose_no_button, col_num=L_MIDDLE_COLUMN, row_num=7),
+                                           anchor=CENTER, justify=CENTER), col_num=L_MIDDLE_COLUMN, row_num=8),
+            WidgetCreationObject(self.save_robot_pose_yes_button, col_num=L_MIDDLE_COLUMN, row_num=9),
+            WidgetCreationObject(self.save_robot_pose_no_button, col_num=L_MIDDLE_COLUMN, row_num=10),
             WidgetCreationObject(ttk.Label(experimentation_frame, text="Save\nrobot force",
-                                           anchor=CENTER, justify=CENTER), col_num=MIDDLE_COLUMN, row_num=5),
-            WidgetCreationObject(self.save_robot_force_yes_button, col_num=MIDDLE_COLUMN, row_num=6),
-            WidgetCreationObject(self.save_robot_force_no_button, col_num=MIDDLE_COLUMN, row_num=7),
+                                           anchor=CENTER, justify=CENTER), col_num=MIDDLE_COLUMN, row_num=8),
+            WidgetCreationObject(self.save_robot_force_yes_button, col_num=MIDDLE_COLUMN, row_num=9),
+            WidgetCreationObject(self.save_robot_force_no_button, col_num=MIDDLE_COLUMN, row_num=10),
             WidgetCreationObject(ttk.Label(experimentation_frame, text="Save\nraw images",
-                                           anchor=CENTER, justify=CENTER), col_num=R_MIDDLE_COLUMN, row_num=5),
-            WidgetCreationObject(self.save_raw_image_yes_button, col_num=R_MIDDLE_COLUMN, row_num=6),
-            WidgetCreationObject(self.save_raw_image_no_button, col_num=R_MIDDLE_COLUMN, row_num=7),
+                                           anchor=CENTER, justify=CENTER), col_num=R_MIDDLE_COLUMN, row_num=8),
+            WidgetCreationObject(self.save_raw_image_yes_button, col_num=R_MIDDLE_COLUMN, row_num=9),
+            WidgetCreationObject(self.save_raw_image_no_button, col_num=R_MIDDLE_COLUMN, row_num=10),
             WidgetCreationObject(ttk.Label(experimentation_frame, text="Save\nimage data",
-                                           anchor=CENTER, justify=CENTER), col_num=RR_MIDDLE_COLUMN, row_num=5),
-            WidgetCreationObject(self.save_image_data_objects_yes_button, col_num=RR_MIDDLE_COLUMN, row_num=6),
-            WidgetCreationObject(self.save_image_data_objects_no_button, col_num=RR_MIDDLE_COLUMN, row_num=7),
+                                           anchor=CENTER, justify=CENTER), col_num=RR_MIDDLE_COLUMN, row_num=8),
+            WidgetCreationObject(self.save_image_data_objects_yes_button, col_num=RR_MIDDLE_COLUMN, row_num=9),
+            WidgetCreationObject(self.save_image_data_objects_no_button, col_num=RR_MIDDLE_COLUMN, row_num=10),
             WidgetCreationObject(ttk.Label(experimentation_frame, text="Save image\ncentroid",
-                                           anchor=CENTER, justify=CENTER), col_num=RIGHT_COLUMN, row_num=5),
-            WidgetCreationObject(self.save_image_centroid_yes_button, col_num=RIGHT_COLUMN, row_num=6),
-            WidgetCreationObject(self.save_image_centroid_no_button, col_num=RIGHT_COLUMN, row_num=7),
-            WidgetCreationObject(self.save_experiment_data_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=8),
+                                           anchor=CENTER, justify=CENTER), col_num=RIGHT_COLUMN, row_num=8),
+            WidgetCreationObject(self.save_image_centroid_yes_button, col_num=RIGHT_COLUMN, row_num=9),
+            WidgetCreationObject(self.save_image_centroid_no_button, col_num=RIGHT_COLUMN, row_num=10),
+            WidgetCreationObject(self.save_experiment_data_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=11),
             WidgetCreationObject(ttk.Separator(experimentation_frame),
-                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=9, padx=0),
-            WidgetCreationObject(self.create_noise_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=10)
+                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=12, padx=0),
+            WidgetCreationObject(self.create_noise_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=13)
         ]
 
         # endregion
@@ -840,6 +909,33 @@ class UserInterface(BasicNode):
         # Update the pose control button
         self.update_pose_control_button()
 
+    def registered_data_save_location_button_callback(self) -> None:
+        """
+        Select the directory in which to save the registered data, publishes it, and displays it.
+        """
+        selected_directory = askdirectory(initialdir=self.registered_data_save_location_str_var.get(),
+                                          title="Select the destination for the exam data.")
+        self.registered_data_save_location_publisher.publish(String(selected_directory))
+        self.registered_data_save_location_str_var.set(selected_directory)
+
+    def registered_data_load_location_button_callback(self) -> None:
+        """
+        Select the directory from which to load the data used to generate the volume. Then publish it and display it.
+        """
+        selected_directory = askdirectory(initialdir=self.registered_data_load_location_str_var.get(),
+                                          title="Select the data to load to generate the volume.")
+        self.registered_data_load_location_publisher.publish(String(selected_directory))
+        self.registered_data_load_location_str_var.set(selected_directory)
+
+    def volume_data_save_location_button_callback(self) -> None:
+        """
+        Select the directory in which to save the volume data, publish it, and display it.
+        """
+        selected_directory = askdirectory(initialdir=self.volume_data_save_location_str_var.get(),
+                                          title="Select the destination for the volume data.")
+        self.volume_data_save_location_publisher.publish(String(selected_directory))
+        self.volume_data_save_location_str_var.set(selected_directory)
+
     def update_pose_control_button(self) -> None:
 
         # Set that pose feedback is now being used
@@ -861,10 +957,7 @@ class UserInterface(BasicNode):
         """
         Publish the command to generate a volume from the ultrasound images.
         """
-        if bool(self.generate_volume_selector_variable.get()):
-            self.generate_volume_command_publisher.publish(Bool(True))
-        else:
-            self.generate_volume_command_publisher.publish(Bool(False))
+        self.generate_volume_command_publisher.publish(Bool(True))
 
     def display_volume_button_callback(self) -> None:
         """
@@ -1060,6 +1153,16 @@ class UserInterface(BasicNode):
         else:
             raise Exception("Button text was not recognized")
 
+    def send_registered_data_override_button_callback(self) -> None:
+        if self.send_registered_data_override_button[WIDGET_TEXT] == START_SENDING_REGISTERED_DATA_OVERRIDE_VALUE:
+            self.is_registered_data_override_active = True
+            self.send_registered_data_override_button[WIDGET_TEXT] = STOP_SENDING_REGISTERED_DATA_OVERRIDE_VALUE
+        elif self.send_registered_data_override_button[WIDGET_TEXT] == STOP_SENDING_REGISTERED_DATA_OVERRIDE_VALUE:
+            self.is_registered_data_override_active = False
+            self.send_registered_data_override_button[WIDGET_TEXT] = START_SENDING_REGISTERED_DATA_OVERRIDE_VALUE
+        else:
+            raise Exception("Button text was not recognized")
+
     def save_experiment_data_button_callback(self) -> None:
 
         new_command_message = SaveExperimentDataCommand()
@@ -1106,12 +1209,12 @@ class UserInterface(BasicNode):
 
     def create_noise_button_callback(self) -> None:
 
-        if self.create_noise_button[WIDGET_TEXT] == START_CREATING_NOISE:
+        if self.create_noise_button[WIDGET_TEXT] == START_CREATING_VELOCITY_NOISE:
             self.create_noise_command_publisher.publish(Bool(True))
             self.create_noise_button[WIDGET_TEXT] = STOP_CREATING_VELOCITY_NOISE
         elif self.create_noise_button[WIDGET_TEXT] == STOP_CREATING_VELOCITY_NOISE:
             self.create_noise_command_publisher.publish(Bool(False))
-            self.create_noise_button[WIDGET_TEXT] = START_CREATING_NOISE
+            self.create_noise_button[WIDGET_TEXT] = START_CREATING_VELOCITY_NOISE
         else:
             raise Exception("Button text was not recognized.")
 
@@ -1243,6 +1346,14 @@ class UserInterface(BasicNode):
     # endregion
     #############################################################################
 
+    def first_time_publishing_loop(self):
+        """
+        Publishes messages a single time on startup.
+        """
+        self.registered_data_save_location_publisher.publish(String(self.registered_data_save_location_str_var.get()))
+        self.registered_data_load_location_publisher.publish(String(self.registered_data_load_location_str_var.get()))
+        self.volume_data_save_location_publisher.publish(String(self.volume_data_save_location_str_var.get()))
+
     def publishing_loop(self):
         """
         Publishes the different commands at regular intervals.
@@ -1253,6 +1364,8 @@ class UserInterface(BasicNode):
         self.use_balancing_feedback_command_publisher.publish(Bool(self.currently_using_balancing_feedback))
         if self.is_patient_contact_override_active:
             self.patient_contact_publisher.publish(Bool(bool(self.select_patient_contact_override_variable.get())))
+        if self.is_registered_data_override_active:
+            self.registered_data_publisher.publish(RegisteredDataMsg())
         root.after(30, self.publishing_loop)
 
 
@@ -1297,6 +1410,9 @@ if __name__ == "__main__":
 
     # Create the control application within the root window
     node = UserInterface(root)
+
+    # Run the first loop publishers
+    node.first_time_publishing_loop()
 
     print("Node initialized.")
     print("Press ctrl+c to terminate.")

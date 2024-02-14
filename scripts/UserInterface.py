@@ -56,8 +56,6 @@ STOP_SAVING_EXPERIMENT_DATA: str = "Stop saving\nexperiment data"
 START_CREATING_VELOCITY_NOISE: str = "Start creating\nvelocity noise"
 STOP_CREATING_VELOCITY_NOISE: str = "Stop creating\nvelocity noise"
 
-
-
 # Define constants for parameters of widgets
 WIDGET_TEXT: str = 'text'
 WIDGET_STATE: str = 'state'
@@ -704,7 +702,8 @@ class UserInterface(BasicNode):
                                            anchor=CENTER, justify=CENTER), col_num=RIGHT_COLUMN, row_num=8),
             WidgetCreationObject(self.save_image_centroid_yes_button, col_num=RIGHT_COLUMN, row_num=9),
             WidgetCreationObject(self.save_image_centroid_no_button, col_num=RIGHT_COLUMN, row_num=10),
-            WidgetCreationObject(self.save_experiment_data_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=11),
+            WidgetCreationObject(self.save_experiment_data_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                 row_num=11),
             WidgetCreationObject(ttk.Separator(experimentation_frame),
                                  col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=12, padx=0),
             WidgetCreationObject(self.create_noise_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=13)

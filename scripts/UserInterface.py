@@ -4,9 +4,10 @@
 File containing UserInterface class.
 """
 
-# TODO - High - Add control for overall speed of the robot
-# TODO - Medium - Add robot controls to allow the user to move the robot around and override the image segmentation
-# TODO - Medium - Change topic names to use constants from topics files
+# TODO - Dream - Add robot controls to allow the user to move the robot around and override the image segmentation
+# TODO - Dream - Add robot controls to allow the user to manually scan but keep the image segmentation, force control,
+#  and balance control active
+# TODO - Dream - Add a command to stop all motion and return all states back to the robot not moving
 
 # Import standard packages
 from tkinter import *
@@ -45,8 +46,8 @@ START_POSE_CONTROL: str = "Start\nPose Control"
 STOP_POSE_CONTROL: str = "Stop\nPose Control"
 TEST_FORCE_CONTROL: str = "Test Force\n Profile"
 STOP_TEST_FORCE_CONTROL: str = "Stop Testing\n Force Control"
-START_SAVING_IMAGES: str = "Start\nSaving Images"
-STOP_SAVING_IMAGES: str = "Stop\nSaving Images"
+START_SAVING_IMAGES: str = "Start Saving Images"
+STOP_SAVING_IMAGES: str = "Stop Saving Images"
 START_SENDING_OVERRIDE_VALUE: str = "Start sending\noverride value"
 STOP_SENDING_OVERRIDE_VALUE: str = "Stop sending\noverride value"
 START_SENDING_REGISTERED_DATA_OVERRIDE_VALUE: str = "Start sending registered data override value"
@@ -74,6 +75,7 @@ RIGHT_COLUMN: int = int(8)
 SINGLE_COLUMN: int = int(1)
 TWO_COLUMN: int = int(2)
 THREE_COLUMN: int = int(3)
+FOUR_COLUMN: int = int(4)
 FULL_WIDTH: int = int(9)
 
 SINGLE_ROW: int = int(1)
@@ -134,6 +136,9 @@ class UserInterface(BasicNode):
         self.i_gain_publisher = Publisher(I_GAIN_SETTING, Float64, queue_size=1)
         self.d_gain_publisher = Publisher(D_GAIN_SETTING, Float64, queue_size=1)
 
+        # Create a publisher to publish the overall speed factor for the robot
+        self.speed_selector_publisher = Publisher(RC_OVERALL_ROBOT_SPEED, Float64, queue_size=1)
+
         # Create a publisher to publish the command to use image feedback
         self.use_image_feedback_command_publisher = Publisher(USE_IMAGE_FEEDBACK, Bool, queue_size=1)
 
@@ -146,7 +151,7 @@ class UserInterface(BasicNode):
                                                                   queue_size=1)
 
         # Create a publisher to publish the command to start and stop the robot motion
-        self.stop_robot_motion_command_publisher = Publisher('/command/stop_motion', Bool, queue_size=1)
+        self.stop_robot_motion_command_publisher = Publisher(STOP_ALL_MOTION, Bool, queue_size=1)
 
         # Create a publisher to publish the command to generate a new image cropping
         self.generate_new_image_cropping_command_publisher = Publisher(CROP_IMAGE_FROM_POINTS, Bool,
@@ -176,7 +181,7 @@ class UserInterface(BasicNode):
                                                                    queue_size=1)
 
         # Create a publisher to publish the command to test the force profile
-        self.test_force_profile_publisher = Publisher('/command/test_force_profile', Bool, queue_size=1)
+        self.test_force_profile_publisher = Publisher(TEST_FORCE_PROFILE, Bool, queue_size=1)
 
         # Create a publisher to publish the command to load image crop coordinates from a file
         self.load_existing_image_cropping_command_publisher = Publisher(CROP_IMAGE_FROM_TEMPLATE,
@@ -555,6 +560,7 @@ class UserInterface(BasicNode):
         self.select_image_destination_directory = ttk.Button(developer_frame,
                                                              text='Select Location of Saved Images',
                                                              command=self.send_save_images_destination)
+        self.speed_selector = IntVar(value=10)
 
         developer_widgets = [
             WidgetCreationObject(ttk.Label(developer_frame, text="Select\nController"),
@@ -603,6 +609,31 @@ class UserInterface(BasicNode):
             WidgetCreationObject(
                 ttk.Button(developer_frame, text="Set Values", command=self.pid_value_setting_callback),
                 col_num=RIGHT_COLUMN, row_num=5),
+            WidgetCreationObject(ttk.Separator(developer_frame),
+                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=6, padx=0),
+            WidgetCreationObject(self.select_image_destination_directory, col_num=LEFT_COLUMN,
+                                 col_span=FOUR_COLUMN + 1, row_num=7),
+            WidgetCreationObject(self.save_images_button, col_num=RL_MIDDLE_COLUMN, col_span=FOUR_COLUMN, row_num=7),
+            WidgetCreationObject(ttk.Label(developer_frame, text="Select the overall speed\nfactor for the robot."),
+                                 col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=8, row_span=DOUBLE_ROW),
+            WidgetCreationObject(Radiobutton(developer_frame, text=0.10, variable=self.speed_selector,
+                                             value=10, command=self.speed_selector_callback),
+                                 col_num=L_MIDDLE_COLUMN, row_num=8),
+            WidgetCreationObject(Radiobutton(developer_frame, text=0.25, variable=self.speed_selector,
+                                             value=25, command=self.speed_selector_callback),
+                                 col_num=MIDDLE_COLUMN, row_num=8),
+            WidgetCreationObject(Radiobutton(developer_frame, text=0.50, variable=self.speed_selector,
+                                             value=50, command=self.speed_selector_callback),
+                                 col_num=R_MIDDLE_COLUMN, row_num=8),
+            WidgetCreationObject(Radiobutton(developer_frame, text=0.75, variable=self.speed_selector,
+                                             value=75, command=self.speed_selector_callback),
+                                 col_num=L_MIDDLE_COLUMN, row_num=9),
+            WidgetCreationObject(Radiobutton(developer_frame, text=1.00, variable=self.speed_selector,
+                                             value=100, command=self.speed_selector_callback),
+                                 col_num=MIDDLE_COLUMN, row_num=9),
+            WidgetCreationObject(Radiobutton(developer_frame, text=1.25, variable=self.speed_selector,
+                                             value=125, command=self.speed_selector_callback),
+                                 col_num=R_MIDDLE_COLUMN, row_num=9),
         ]
 
         # endregion
@@ -618,11 +649,6 @@ class UserInterface(BasicNode):
         self.send_registered_data_override_button = ttk.Button(experimentation_frame,
                                                                text=START_SENDING_REGISTERED_DATA_OVERRIDE_VALUE,
                                                                command=self.send_registered_data_override_button_callback)
-        self.save_images_button = ttk.Button(experimentation_frame, text=START_SAVING_IMAGES,
-                                             command=self.send_image_saving_command_callback)
-        self.select_image_destination_directory = ttk.Button(experimentation_frame,
-                                                             text='Select Location\nto Save Images',
-                                                             command=self.send_save_images_destination)
         self.save_robot_pose_variable = IntVar()
         self.save_robot_pose_yes_button = ttk.Radiobutton(experimentation_frame, text="Yes", value=YES_BUTTON,
                                                           variable=self.save_robot_pose_variable)
@@ -672,11 +698,6 @@ class UserInterface(BasicNode):
                                  col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=2, padx=0),
             WidgetCreationObject(self.send_registered_data_override_button, col_num=LEFT_COLUMN, row_num=3,
                                  col_span=FULL_WIDTH),
-            WidgetCreationObject(ttk.Separator(experimentation_frame),
-                                 col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=5, padx=0),
-            WidgetCreationObject(self.select_image_destination_directory, col_num=LEFT_COLUMN,
-                                 col_span=THREE_COLUMN, row_num=6),
-            WidgetCreationObject(self.save_images_button, col_num=R_MIDDLE_COLUMN, col_span=TWO_COLUMN, row_num=6),
             WidgetCreationObject(ttk.Separator(experimentation_frame),
                                  col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=7, padx=0),
             WidgetCreationObject(ttk.Label(experimentation_frame,
@@ -1119,6 +1140,12 @@ class UserInterface(BasicNode):
         """
         self.pid_controller_publisher.publish(UInt8(self.pid_selector.get()))
 
+    def speed_selector_callback(self) -> None:
+        """
+        Publish the speed selected on the interface.
+        """
+        self.speed_selector_publisher.publish(Float64(self.speed_selector.get()/100))
+
     def pid_value_setting_callback(self) -> None:
         """
         Publish the values selected in the interface
@@ -1352,6 +1379,7 @@ class UserInterface(BasicNode):
         self.registered_data_save_location_publisher.publish(String(self.registered_data_save_location_str_var.get()))
         self.registered_data_load_location_publisher.publish(String(self.registered_data_load_location_str_var.get()))
         self.volume_data_save_location_publisher.publish(String(self.volume_data_save_location_str_var.get()))
+        self.speed_selector_publisher.publish(Float64(1.0))
 
     def publishing_loop(self):
         """

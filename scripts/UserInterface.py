@@ -8,6 +8,7 @@ File containing UserInterface class.
 # TODO - Dream - Add robot controls to allow the user to manually scan but keep the image segmentation, force control,
 #  and balance control active
 # TODO - Dream - Add a command to stop all motion and return all states back to the robot not moving
+# TODO - Medium - Add trajectory pause button and activation and deactivation of robot controls
 
 # Import standard packages
 from tkinter import *
@@ -17,7 +18,7 @@ import tkinter.ttk as ttk
 from argparse import ArgumentParser
 
 # Import ROS packages
-from geometry_msgs.msg import WrenchStamped
+from geometry_msgs.msg import WrenchStamped, TwistStamped, Twist
 from std_msgs.msg import String, UInt8
 
 # Import custom ROS packages
@@ -54,12 +55,15 @@ START_SENDING_REGISTERED_DATA_OVERRIDE_VALUE: str = "Start sending registered da
 STOP_SENDING_REGISTERED_DATA_OVERRIDE_VALUE: str = "Stop sending registered data override value"
 START_SAVING_EXPERIMENT_DATA: str = "Start saving\nexperiment data"
 STOP_SAVING_EXPERIMENT_DATA: str = "Stop saving\nexperiment data"
+TOGGLE_SAVING_EXPERIMENT_DATA: str = "Toggle saving\nexperiment data"
 START_CREATING_VELOCITY_NOISE: str = "Start creating\nvelocity noise"
 STOP_CREATING_VELOCITY_NOISE: str = "Stop creating\nvelocity noise"
 
 # Define constants for parameters of widgets
 WIDGET_TEXT: str = 'text'
 WIDGET_STATE: str = 'state'
+BUTTON_PRESS: str = '<ButtonPress-1>'
+BUTTON_RELEASE: str = '<ButtonRelease-1>'
 
 # Define grid geometry constants
 LEFT_COLUMN: int = int(0)
@@ -94,6 +98,17 @@ RUNNING: int = int(1)
 # Define constants for yes and no radio buttons
 YES_BUTTON: int = int(1)
 NO_BUTTON: int = int(0)
+
+# Define constants for robot control
+POSITIVE_X: str = '+X'
+POSITIVE_Y: str = '+Y'
+POSITIVE_PITCH: str = '+Pitch'
+POSITIVE_YAW: str = '+Yaw'
+NEGATIVE_X: str = '-X'
+NEGATIVE_Y: str = '-Y'
+NEGATIVE_PITCH: str = '-Pitch'
+NEGATIVE_YAW: str = '-Yaw'
+NO_MOVEMENT: str = 'STOP'
 
 
 class UserInterface(BasicNode):
@@ -234,11 +249,17 @@ class UserInterface(BasicNode):
         # Define a publisher for publishing the location in which to save volume data
         self.volume_data_save_location_publisher = Publisher(VOLUME_DATA_SAVE_LOCATION, String, queue_size=1)
 
+        # Define a publisher for publishing robot control velocity commands
+        self.manual_robot_control_publisher = Publisher(RC_MANUAL_CONTROL_INPUT, TwistStamped, queue_size=1)
+
         # Create a subscriber to listen to the external force felt by the robot
         Subscriber(ROBOT_DERIVED_FORCE, WrenchStamped, self.robot_sensed_force_callback)
 
         # Create a subscriber to hear debug messages
         Subscriber(LOGGING, log_message, self.debug_status_messages_callback)
+
+        # Create a subscriber to listen for when the trajectory has been completed
+        Subscriber(RC_TRAJECTORY_COMPLETE, Bool, self.trajectory_complete_callback)
 
         # endregion
         # ---------------------------------------
@@ -253,14 +274,20 @@ class UserInterface(BasicNode):
         self.currently_using_pose_feedback = False
         self.currently_using_balancing_feedback = False
 
+        # Define a variable to hold the velocity to publish for the manual control
+        self.manual_control_velocity_message = None
+
         # Set the title of the window
         self.parent.title("User Interface")
 
         # Define the frame in which all objects will be created
         main_content_frame = Frame(parent)
 
-        # Define a frame to hold the always visible components
-        always_visible_frame = Frame(main_content_frame)
+        # Define a frame to hold the always visible control buttons
+        button_controls_frame = Frame(main_content_frame)
+
+        # Define a frame to hold the robot control buttons
+        robot_controls_frame = Frame(main_content_frame)
 
         # Define a notebook to manage the tabs within the GUI
         tab_controller = ttk.Notebook(main_content_frame)
@@ -283,17 +310,17 @@ class UserInterface(BasicNode):
         if passed_arguments.experimentation_mode:
             tab_controller.add(experimentation_frame, text="Experimentation")
 
-        # Define the widgets used in the always_visible_frame
+        # Define the widgets used in the button_controls_frame
         # region
         # Define the buttons used for image streaming in testing
-        self.image_streaming_button = ttk.Button(always_visible_frame, text=START_IMAGE_STREAMING,
+        self.image_streaming_button = ttk.Button(button_controls_frame, text=START_IMAGE_STREAMING,
                                                  command=self.image_streaming_button_callback)
-        self.restart_image_streaming_button = ttk.Button(always_visible_frame, text="Restart\nImage Streaming",
+        self.restart_image_streaming_button = ttk.Button(button_controls_frame, text="Restart\nImage Streaming",
                                                          command=self.restart_image_streaming_button_callback,
                                                          )
 
         # List the widgets used for testing in the always visible frame at the bottom
-        always_visible_testing_widgets = [
+        button_controls_testing_widgets = [
             WidgetCreationObject(self.image_streaming_button,
                                  col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
                                  row_num=0, row_span=SINGLE_ROW,
@@ -305,28 +332,114 @@ class UserInterface(BasicNode):
         ]
 
         # Define the buttons used for general control
-        self.image_control_button = ttk.Button(always_visible_frame, text=START_IMAGE_CONTROL,
+        self.image_control_button = ttk.Button(button_controls_frame, text=START_IMAGE_CONTROL,
                                                command=self.image_control_button_callback)
-        self.force_control_button = ttk.Button(always_visible_frame, text=START_FORCE_CONTROL,
+        self.force_control_button = ttk.Button(button_controls_frame, text=START_FORCE_CONTROL,
                                                command=self.force_control_button_callback)
-        self.balancing_control_button = ttk.Button(always_visible_frame, text=START_BALANCING_CONTROL,
+        self.balancing_control_button = ttk.Button(button_controls_frame, text=START_BALANCING_CONTROL,
                                                    command=self.balancing_control_button_callback)
-        self.pose_control_button = ttk.Button(always_visible_frame, text=STOP_POSE_CONTROL,
+        self.pose_control_button = ttk.Button(button_controls_frame, text=STOP_POSE_CONTROL,
                                               command=self.pose_control_button_callback, state=DISABLED)
 
         # List the widgets used for general control in the always visible frame at the bottom
-        always_visible_streaming_widgets = [
+        button_controls_streaming_widgets = [
             WidgetCreationObject(self.force_control_button, col_num=MIDDLE_COLUMN, row_num=0),
             WidgetCreationObject(self.balancing_control_button, col_num=R_MIDDLE_COLUMN, row_num=0),
             WidgetCreationObject(self.image_control_button, col_num=RIGHT_COLUMN, row_num=0, ),
             WidgetCreationObject(self.pose_control_button, col_num=RIGHT_COLUMN + 1, row_num=0)
         ]
 
-        # Select which widgets to display in the always_visible_frame based on which function mode the GUI is in
-        self.always_visible_frame_widgets = always_visible_streaming_widgets
+        # Select which widgets to display in the button_controls_frame based on which function mode the GUI is in
+        self.button_controls_frame_widgets = button_controls_streaming_widgets
         if passed_arguments.testing_mode:
-            self.always_visible_frame_widgets = always_visible_testing_widgets + self.always_visible_frame_widgets
+            self.button_controls_frame_widgets = button_controls_testing_widgets + self.button_controls_frame_widgets
 
+        # endregion
+
+        # Define the widgets used for the robot_controls_frame
+        # region
+        self.positive_x_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_X, width=5)
+        self.positive_x_movement_button.bind(BUTTON_PRESS,
+                                             lambda event, axis_and_direction=POSITIVE_X:
+                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+        self.positive_x_movement_button.bind(BUTTON_RELEASE,
+                                             lambda event, axis_and_direction=NO_MOVEMENT:
+                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+
+        self.negative_x_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_X, width=5)
+        self.negative_x_movement_button.bind(BUTTON_PRESS,
+                                             lambda event, axis_and_direction=NEGATIVE_X:
+                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+        self.negative_x_movement_button.bind(BUTTON_RELEASE,
+                                             lambda event, axis_and_direction=NO_MOVEMENT:
+                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+
+        self.positive_y_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_Y, width=5)
+        self.positive_y_movement_button.bind(BUTTON_PRESS,
+                                             lambda event, axis_and_direction=POSITIVE_Y:
+                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+        self.positive_y_movement_button.bind(BUTTON_RELEASE,
+                                             lambda event, axis_and_direction=NO_MOVEMENT:
+                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+
+        self.negative_y_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_Y, width=5)
+        self.negative_y_movement_button.bind(BUTTON_PRESS,
+                                             lambda event, axis_and_direction=NEGATIVE_Y:
+                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+        self.negative_y_movement_button.bind(BUTTON_RELEASE,
+                                             lambda event, axis_and_direction=NO_MOVEMENT:
+                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+
+        self.positive_pitch_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_PITCH, width=5)
+        self.positive_pitch_movement_button.bind(BUTTON_PRESS,
+                                                 lambda event, axis_and_direction=POSITIVE_PITCH:
+                                                 self.robot_control_button_callback(
+                                                     axis_and_direction=axis_and_direction))
+        self.positive_pitch_movement_button.bind(BUTTON_RELEASE,
+                                                 lambda event, axis_and_direction=NO_MOVEMENT:
+                                                 self.robot_control_button_callback(
+                                                     axis_and_direction=axis_and_direction))
+
+        self.negative_pitch_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_PITCH, width=5)
+        self.negative_pitch_movement_button.bind(BUTTON_PRESS,
+                                                 lambda event, axis_and_direction=NEGATIVE_PITCH:
+                                                 self.robot_control_button_callback(
+                                                     axis_and_direction=axis_and_direction))
+        self.negative_pitch_movement_button.bind(BUTTON_RELEASE,
+                                                 lambda event, axis_and_direction=NO_MOVEMENT:
+                                                 self.robot_control_button_callback(
+                                                     axis_and_direction=axis_and_direction))
+
+        self.positive_yaw_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_YAW, width=5)
+        self.positive_yaw_movement_button.bind(BUTTON_PRESS,
+                                               lambda event, axis_and_direction=POSITIVE_YAW:
+                                               self.robot_control_button_callback(
+                                                   axis_and_direction=axis_and_direction))
+        self.positive_yaw_movement_button.bind(BUTTON_RELEASE,
+                                               lambda event, axis_and_direction=NO_MOVEMENT:
+                                               self.robot_control_button_callback(
+                                                   axis_and_direction=axis_and_direction))
+
+        self.negative_yaw_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_YAW, width=5)
+        self.negative_yaw_movement_button.bind(BUTTON_PRESS,
+                                               lambda event, axis_and_direction=NEGATIVE_YAW:
+                                               self.robot_control_button_callback(
+                                                   axis_and_direction=axis_and_direction))
+        self.negative_yaw_movement_button.bind(BUTTON_RELEASE,
+                                               lambda event, axis_and_direction=NO_MOVEMENT:
+                                               self.robot_control_button_callback(
+                                                   axis_and_direction=axis_and_direction))
+
+        robot_controls_widgets = [
+            WidgetCreationObject(self.positive_x_movement_button, col_num=MIDDLE_COLUMN, row_num=1),
+            WidgetCreationObject(self.negative_x_movement_button, col_num=MIDDLE_COLUMN, row_num=3),
+            WidgetCreationObject(self.positive_y_movement_button, col_num=RL_MIDDLE_COLUMN, row_num=2),
+            WidgetCreationObject(self.negative_y_movement_button, col_num=LR_MIDDLE_COLUMN, row_num=2),
+            WidgetCreationObject(self.negative_pitch_movement_button, col_num=RR_MIDDLE_COLUMN, row_num=1),
+            WidgetCreationObject(self.positive_pitch_movement_button, col_num=RR_MIDDLE_COLUMN, row_num=3),
+            WidgetCreationObject(self.positive_yaw_movement_button, col_num=RL_MIDDLE_COLUMN, row_num=0),
+            WidgetCreationObject(self.negative_yaw_movement_button, col_num=LR_MIDDLE_COLUMN, row_num=0),
+        ]
         # endregion
 
         # Define the widgets used in the exam_setup_frame
@@ -616,22 +729,22 @@ class UserInterface(BasicNode):
             WidgetCreationObject(self.save_images_button, col_num=RL_MIDDLE_COLUMN, col_span=FOUR_COLUMN, row_num=7),
             WidgetCreationObject(ttk.Label(developer_frame, text="Select the overall speed\nfactor for the robot."),
                                  col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=8, row_span=DOUBLE_ROW),
-            WidgetCreationObject(Radiobutton(developer_frame, text=0.10, variable=self.speed_selector,
+            WidgetCreationObject(Radiobutton(developer_frame, text="10%", variable=self.speed_selector,
                                              value=10, command=self.speed_selector_callback),
                                  col_num=L_MIDDLE_COLUMN, row_num=8),
-            WidgetCreationObject(Radiobutton(developer_frame, text=0.25, variable=self.speed_selector,
+            WidgetCreationObject(Radiobutton(developer_frame, text="25%", variable=self.speed_selector,
                                              value=25, command=self.speed_selector_callback),
                                  col_num=MIDDLE_COLUMN, row_num=8),
-            WidgetCreationObject(Radiobutton(developer_frame, text=0.50, variable=self.speed_selector,
+            WidgetCreationObject(Radiobutton(developer_frame, text="50%", variable=self.speed_selector,
                                              value=50, command=self.speed_selector_callback),
                                  col_num=R_MIDDLE_COLUMN, row_num=8),
-            WidgetCreationObject(Radiobutton(developer_frame, text=0.75, variable=self.speed_selector,
+            WidgetCreationObject(Radiobutton(developer_frame, text="75%", variable=self.speed_selector,
                                              value=75, command=self.speed_selector_callback),
                                  col_num=L_MIDDLE_COLUMN, row_num=9),
-            WidgetCreationObject(Radiobutton(developer_frame, text=1.00, variable=self.speed_selector,
+            WidgetCreationObject(Radiobutton(developer_frame, text="100%", variable=self.speed_selector,
                                              value=100, command=self.speed_selector_callback),
                                  col_num=MIDDLE_COLUMN, row_num=9),
-            WidgetCreationObject(Radiobutton(developer_frame, text=1.25, variable=self.speed_selector,
+            WidgetCreationObject(Radiobutton(developer_frame, text="125%", variable=self.speed_selector,
                                              value=125, command=self.speed_selector_callback),
                                  col_num=R_MIDDLE_COLUMN, row_num=9),
         ]
@@ -642,6 +755,11 @@ class UserInterface(BasicNode):
         # region
         self.select_patient_contact_override_variable = IntVar()
         self.is_patient_contact_override_active = False
+        self.in_contact_radio_button = ttk.Radiobutton(experimentation_frame, text="In-contact", value=YES_BUTTON,
+                                                       variable=self.select_patient_contact_override_variable)
+        self.not_in_contact_radio_button = ttk.Radiobutton(experimentation_frame, text="Not In-contact",
+                                                           value=NO_BUTTON,
+                                                           variable=self.select_patient_contact_override_variable)
         self.send_patient_contact_override_button = ttk.Button(experimentation_frame,
                                                                text=START_SENDING_OVERRIDE_VALUE,
                                                                command=self.send_patient_contact_override_button_callback)
@@ -674,6 +792,11 @@ class UserInterface(BasicNode):
                                                               variable=self.save_image_centroid_variable)
         self.save_image_centroid_no_button = ttk.Radiobutton(experimentation_frame, text="No", value=NO_BUTTON,
                                                              variable=self.save_image_centroid_variable)
+        self.save_skin_error_variable = IntVar()
+        self.save_skin_error_yes_button = ttk.Radiobutton(experimentation_frame, text="Yes", value=YES_BUTTON,
+                                                          variable=self.save_skin_error_variable)
+        self.save_skin_error_no_button = ttk.Radiobutton(experimentation_frame, text="No", value=NO_BUTTON,
+                                                         variable=self.save_skin_error_variable)
         self.is_experiment_data_saving_active = False
         self.save_experiment_data_button = ttk.Button(experimentation_frame,
                                                       text=START_SAVING_EXPERIMENT_DATA,
@@ -685,15 +808,13 @@ class UserInterface(BasicNode):
             WidgetCreationObject(ttk.Label(experimentation_frame, text="Select the value to send to override\n"
                                                                        "the calculated patient contact value",
                                            anchor=CENTER, justify=CENTER),
-                                 col_num=LEFT_COLUMN, col_span=THREE_COLUMN, row_num=0, row_span=DOUBLE_ROW),
-            WidgetCreationObject(ttk.Radiobutton(experimentation_frame, text="In-contact", value=YES_BUTTON,
-                                                 variable=self.select_patient_contact_override_variable),
-                                 col_num=R_MIDDLE_COLUMN, row_num=0),
-            WidgetCreationObject(ttk.Radiobutton(experimentation_frame, text="Not In-contact", value=NO_BUTTON,
-                                                 variable=self.select_patient_contact_override_variable),
-                                 col_num=R_MIDDLE_COLUMN, row_num=1),
-            WidgetCreationObject(self.send_patient_contact_override_button, col_num=RIGHT_COLUMN, row_num=0,
-                                 row_span=DOUBLE_ROW),
+                                 col_num=LEFT_COLUMN, col_span=FOUR_COLUMN, row_num=0, row_span=DOUBLE_ROW),
+            WidgetCreationObject(self.in_contact_radio_button, col_num=MIDDLE_COLUMN, col_span=TWO_COLUMN,
+                                 row_num=0, sticky=''),
+            WidgetCreationObject(self.not_in_contact_radio_button, col_num=MIDDLE_COLUMN, col_span=TWO_COLUMN,
+                                 row_num=1, sticky=''),
+            WidgetCreationObject(self.send_patient_contact_override_button, col_num=R_MIDDLE_COLUMN,
+                                 col_span=TWO_COLUMN, row_num=0, row_span=DOUBLE_ROW),
             WidgetCreationObject(ttk.Separator(experimentation_frame),
                                  col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=2, padx=0),
             WidgetCreationObject(self.send_registered_data_override_button, col_num=LEFT_COLUMN, row_num=3,
@@ -702,27 +823,33 @@ class UserInterface(BasicNode):
                                  col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=7, padx=0),
             WidgetCreationObject(ttk.Label(experimentation_frame,
                                            text="Select the data\nto save for\nthis experiment", anchor=CENTER),
-                                 col_num=LEFT_COLUMN, row_num=8, row_span=3),
+                                 col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=8, row_span=3),
             WidgetCreationObject(ttk.Label(experimentation_frame, text="Save\nrobot pose",
                                            anchor=CENTER, justify=CENTER), col_num=L_MIDDLE_COLUMN, row_num=8),
-            WidgetCreationObject(self.save_robot_pose_yes_button, col_num=L_MIDDLE_COLUMN, row_num=9),
-            WidgetCreationObject(self.save_robot_pose_no_button, col_num=L_MIDDLE_COLUMN, row_num=10),
+            WidgetCreationObject(self.save_robot_pose_yes_button, col_num=L_MIDDLE_COLUMN, row_num=9, sticky=""),
+            WidgetCreationObject(self.save_robot_pose_no_button, col_num=L_MIDDLE_COLUMN, row_num=10, sticky=""),
             WidgetCreationObject(ttk.Label(experimentation_frame, text="Save\nrobot force",
-                                           anchor=CENTER, justify=CENTER), col_num=MIDDLE_COLUMN, row_num=8),
-            WidgetCreationObject(self.save_robot_force_yes_button, col_num=MIDDLE_COLUMN, row_num=9),
-            WidgetCreationObject(self.save_robot_force_no_button, col_num=MIDDLE_COLUMN, row_num=10),
+                                           anchor=CENTER, justify=CENTER), col_num=LR_MIDDLE_COLUMN, row_num=8),
+            WidgetCreationObject(self.save_robot_force_yes_button, col_num=LR_MIDDLE_COLUMN, row_num=9, sticky=""),
+            WidgetCreationObject(self.save_robot_force_no_button, col_num=LR_MIDDLE_COLUMN, row_num=10, sticky=""),
             WidgetCreationObject(ttk.Label(experimentation_frame, text="Save\nraw images",
-                                           anchor=CENTER, justify=CENTER), col_num=R_MIDDLE_COLUMN, row_num=8),
-            WidgetCreationObject(self.save_raw_image_yes_button, col_num=R_MIDDLE_COLUMN, row_num=9),
-            WidgetCreationObject(self.save_raw_image_no_button, col_num=R_MIDDLE_COLUMN, row_num=10),
+                                           anchor=CENTER, justify=CENTER), col_num=MIDDLE_COLUMN, row_num=8),
+            WidgetCreationObject(self.save_raw_image_yes_button, col_num=MIDDLE_COLUMN, row_num=9, sticky=""),
+            WidgetCreationObject(self.save_raw_image_no_button, col_num=MIDDLE_COLUMN, row_num=10, sticky=""),
             WidgetCreationObject(ttk.Label(experimentation_frame, text="Save\nimage data",
-                                           anchor=CENTER, justify=CENTER), col_num=RR_MIDDLE_COLUMN, row_num=8),
-            WidgetCreationObject(self.save_image_data_objects_yes_button, col_num=RR_MIDDLE_COLUMN, row_num=9),
-            WidgetCreationObject(self.save_image_data_objects_no_button, col_num=RR_MIDDLE_COLUMN, row_num=10),
+                                           anchor=CENTER, justify=CENTER), col_num=RL_MIDDLE_COLUMN, row_num=8),
+            WidgetCreationObject(self.save_image_data_objects_yes_button, col_num=RL_MIDDLE_COLUMN, row_num=9,
+                                 sticky=""),
+            WidgetCreationObject(self.save_image_data_objects_no_button, col_num=RL_MIDDLE_COLUMN, row_num=10,
+                                 sticky=""),
             WidgetCreationObject(ttk.Label(experimentation_frame, text="Save image\ncentroid",
-                                           anchor=CENTER, justify=CENTER), col_num=RIGHT_COLUMN, row_num=8),
-            WidgetCreationObject(self.save_image_centroid_yes_button, col_num=RIGHT_COLUMN, row_num=9),
-            WidgetCreationObject(self.save_image_centroid_no_button, col_num=RIGHT_COLUMN, row_num=10),
+                                           anchor=CENTER, justify=CENTER), col_num=R_MIDDLE_COLUMN, row_num=8),
+            WidgetCreationObject(self.save_image_centroid_yes_button, col_num=R_MIDDLE_COLUMN, row_num=9, sticky=""),
+            WidgetCreationObject(self.save_image_centroid_no_button, col_num=R_MIDDLE_COLUMN, row_num=10, sticky=""),
+            WidgetCreationObject(ttk.Label(experimentation_frame, text="Save skin\nerror",
+                                           anchor=CENTER, justify=CENTER), col_num=RR_MIDDLE_COLUMN, row_num=8),
+            WidgetCreationObject(self.save_skin_error_yes_button, col_num=RR_MIDDLE_COLUMN, row_num=9, sticky=""),
+            WidgetCreationObject(self.save_skin_error_no_button, col_num=RR_MIDDLE_COLUMN, row_num=10, sticky=""),
             WidgetCreationObject(self.save_experiment_data_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
                                  row_num=11),
             WidgetCreationObject(ttk.Separator(experimentation_frame),
@@ -734,7 +861,8 @@ class UserInterface(BasicNode):
 
         # Add the widgets to each frame
         list_of_list_of_widgets = [
-            self.always_visible_frame_widgets,
+            self.button_controls_frame_widgets,
+            robot_controls_widgets,
             self.exam_setup_widgets,
             self.thyroid_exam_widgets,
             self.nodule_exam_widgets,
@@ -750,8 +878,9 @@ class UserInterface(BasicNode):
         main_content_frame.grid(column=0, row=0)
 
         # Add the two frames to the main frame
-        tab_controller.grid(column=LEFT_COLUMN, columnspan=FULL_WIDTH, row=0)
-        always_visible_frame.grid(column=LEFT_COLUMN, columnspan=FULL_WIDTH, row=1)
+        tab_controller.grid(column=LEFT_COLUMN, columnspan=SINGLE_COLUMN, row=0)
+        button_controls_frame.grid(column=LEFT_COLUMN, columnspan=SINGLE_COLUMN, row=1)
+        robot_controls_frame.grid(column=RIGHT_COLUMN, columnspan=SINGLE_COLUMN, row=0, rowspan=DOUBLE_ROW)
 
         # Allow the window to be resized
         parent.columnconfigure(0, weight=1)
@@ -765,6 +894,39 @@ class UserInterface(BasicNode):
     ############################################################################
     # Define GUI button callbacks
     # region
+
+    def robot_control_button_callback(self, axis_and_direction: str):
+
+        # Get the velocity to give the message
+        linear_movement_speed = 0.01
+        angular_movement_speed = 0.1
+
+        # Get the speed factor
+        speed_factor = 1.0
+
+        # Create the common message
+        self.manual_control_velocity_message = Twist()
+
+        if axis_and_direction == NO_MOVEMENT:
+            self.manual_control_velocity_message = None
+        elif axis_and_direction == POSITIVE_X:
+            self.manual_control_velocity_message.linear.x = linear_movement_speed * speed_factor
+        elif axis_and_direction == NEGATIVE_X:
+            self.manual_control_velocity_message.linear.x = -linear_movement_speed * speed_factor
+        elif axis_and_direction == POSITIVE_Y:
+            self.manual_control_velocity_message.linear.y = linear_movement_speed * speed_factor
+        elif axis_and_direction == NEGATIVE_Y:
+            self.manual_control_velocity_message.linear.y = -linear_movement_speed * speed_factor
+        elif axis_and_direction == POSITIVE_PITCH:
+            self.manual_control_velocity_message.angular.y = angular_movement_speed * speed_factor
+        elif axis_and_direction == NEGATIVE_PITCH:
+            self.manual_control_velocity_message.angular.y = -angular_movement_speed * speed_factor
+        elif axis_and_direction == POSITIVE_YAW:
+            self.manual_control_velocity_message.angular.z = angular_movement_speed * speed_factor
+        elif axis_and_direction == NEGATIVE_YAW:
+            self.manual_control_velocity_message.angular.z = -angular_movement_speed * speed_factor
+        else:
+            raise Exception(axis_and_direction + " is not a recognized movement direction.")
 
     @staticmethod
     def entry_widget_float_validation(new_entry: str) -> bool:
@@ -918,6 +1080,9 @@ class UserInterface(BasicNode):
         # Update the pose control button
         self.update_pose_control_button()
 
+        # Update the data saving button
+        self.save_experiment_data_button_callback(action=START_SAVING_EXPERIMENT_DATA)
+
     def scan_negative_button_callback(self) -> None:
         """
         Publish the command to scan downwards.
@@ -929,14 +1094,18 @@ class UserInterface(BasicNode):
         # Update the pose control button
         self.update_pose_control_button()
 
+        # Update the data saving button
+        self.save_experiment_data_button_callback(action=START_SAVING_EXPERIMENT_DATA)
+
     def registered_data_save_location_button_callback(self) -> None:
         """
         Select the directory in which to save the registered data, publishes it, and displays it.
         """
         selected_directory = askdirectory(initialdir=self.registered_data_save_location_str_var.get(),
                                           title="Select the destination for the exam data.")
-        self.registered_data_save_location_publisher.publish(String(selected_directory))
-        self.registered_data_save_location_str_var.set(selected_directory)
+        if len(selected_directory) > 3:
+            self.registered_data_save_location_publisher.publish(String(selected_directory))
+            self.registered_data_save_location_str_var.set(selected_directory)
 
     def registered_data_load_location_button_callback(self) -> None:
         """
@@ -944,8 +1113,9 @@ class UserInterface(BasicNode):
         """
         selected_directory = askdirectory(initialdir=self.registered_data_load_location_str_var.get(),
                                           title="Select the data to load to generate the volume.")
-        self.registered_data_load_location_publisher.publish(String(selected_directory))
-        self.registered_data_load_location_str_var.set(selected_directory)
+        if len(selected_directory) > 3:
+            self.registered_data_load_location_publisher.publish(String(selected_directory))
+            self.registered_data_load_location_str_var.set(selected_directory)
 
     def volume_data_save_location_button_callback(self) -> None:
         """
@@ -953,8 +1123,9 @@ class UserInterface(BasicNode):
         """
         selected_directory = askdirectory(initialdir=self.volume_data_save_location_str_var.get(),
                                           title="Select the destination for the volume data.")
-        self.volume_data_save_location_publisher.publish(String(selected_directory))
-        self.volume_data_save_location_str_var.set(selected_directory)
+        if len(selected_directory) > 3:
+            self.volume_data_save_location_publisher.publish(String(selected_directory))
+            self.volume_data_save_location_str_var.set(selected_directory)
 
     def update_pose_control_button(self) -> None:
 
@@ -966,6 +1137,23 @@ class UserInterface(BasicNode):
 
         # Update the pose control button
         self.pose_control_button[WIDGET_STATE] = NORMAL
+
+    def trajectory_complete_callback(self, msg: Bool) -> None:
+        """
+        Resets the pose control and experiment data saving buttons.
+        """
+
+        # Set the state to be that the robot is not currently using force_feedback
+        self.currently_using_pose_feedback = False
+
+        # Publish the command to stop using force feedback
+        self.use_pose_feedback_command_publisher.publish(Bool(self.currently_using_pose_feedback))
+
+        # Set the state of the button
+        self.pose_control_button[WIDGET_STATE] = DISABLED
+
+        # Reset the save experiment data buttons
+        self.save_experiment_data_button_callback(action=STOP_SAVING_EXPERIMENT_DATA)
 
     def complete_full_scan_button_callback(self) -> None:
         """
@@ -1134,6 +1322,9 @@ class UserInterface(BasicNode):
         # Set the state of the button
         self.pose_control_button[WIDGET_STATE] = DISABLED
 
+        # Reset the save experiment data buttons
+        self.save_experiment_data_button_callback(action=STOP_SAVING_EXPERIMENT_DATA)
+
     def pid_controller_selection_callback(self) -> None:
         """
         Publish the pid controller selected on the interface.
@@ -1144,7 +1335,7 @@ class UserInterface(BasicNode):
         """
         Publish the speed selected on the interface.
         """
-        self.speed_selector_publisher.publish(Float64(self.speed_selector.get()/100))
+        self.speed_selector_publisher.publish(Float64(self.speed_selector.get() / 100))
 
     def pid_value_setting_callback(self) -> None:
         """
@@ -1172,9 +1363,13 @@ class UserInterface(BasicNode):
     def send_patient_contact_override_button_callback(self) -> None:
         if self.send_patient_contact_override_button[WIDGET_TEXT] == START_SENDING_OVERRIDE_VALUE:
             self.is_patient_contact_override_active = True
+            self.in_contact_radio_button[WIDGET_STATE] = DISABLED
+            self.not_in_contact_radio_button[WIDGET_STATE] = DISABLED
             self.send_patient_contact_override_button[WIDGET_TEXT] = STOP_SENDING_OVERRIDE_VALUE
         elif self.send_patient_contact_override_button[WIDGET_TEXT] == STOP_SENDING_OVERRIDE_VALUE:
             self.is_patient_contact_override_active = False
+            self.in_contact_radio_button[WIDGET_STATE] = NORMAL
+            self.not_in_contact_radio_button[WIDGET_STATE] = NORMAL
             self.send_patient_contact_override_button[WIDGET_TEXT] = START_SENDING_OVERRIDE_VALUE
         else:
             raise Exception("Button text was not recognized")
@@ -1189,11 +1384,13 @@ class UserInterface(BasicNode):
         else:
             raise Exception("Button text was not recognized")
 
-    def save_experiment_data_button_callback(self) -> None:
+    def save_experiment_data_button_callback(self, action: str = TOGGLE_SAVING_EXPERIMENT_DATA) -> None:
 
         new_command_message = SaveExperimentDataCommand()
 
-        if self.save_experiment_data_button[WIDGET_TEXT] == START_SAVING_EXPERIMENT_DATA:
+        if (action == TOGGLE_SAVING_EXPERIMENT_DATA and
+            self.save_experiment_data_button[WIDGET_TEXT] == START_SAVING_EXPERIMENT_DATA) or \
+                action == START_SAVING_EXPERIMENT_DATA:
             self.save_experiment_data_button[WIDGET_TEXT] = STOP_SAVING_EXPERIMENT_DATA
             if bool(self.save_robot_pose_variable.get()):
                 new_command_message.save_pose = True
@@ -1205,6 +1402,8 @@ class UserInterface(BasicNode):
                 new_command_message.save_image_data = True
             if bool(self.save_image_centroid_variable.get()):
                 new_command_message.save_image_centroid = True
+            if bool(self.save_skin_error_variable.get()):
+                new_command_message.save_skin_error = True
             self.save_robot_pose_yes_button[WIDGET_STATE] = DISABLED
             self.save_robot_pose_no_button[WIDGET_STATE] = DISABLED
             self.save_robot_force_yes_button[WIDGET_STATE] = DISABLED
@@ -1215,8 +1414,12 @@ class UserInterface(BasicNode):
             self.save_image_data_objects_no_button[WIDGET_STATE] = DISABLED
             self.save_image_centroid_yes_button[WIDGET_STATE] = DISABLED
             self.save_image_centroid_no_button[WIDGET_STATE] = DISABLED
+            self.save_skin_error_yes_button[WIDGET_STATE] = DISABLED
+            self.save_skin_error_no_button[WIDGET_STATE] = DISABLED
 
-        elif self.save_experiment_data_button[WIDGET_TEXT] == STOP_SAVING_EXPERIMENT_DATA:
+        elif (action == TOGGLE_SAVING_EXPERIMENT_DATA and
+              self.save_experiment_data_button[WIDGET_TEXT] == STOP_SAVING_EXPERIMENT_DATA) or \
+                action == STOP_SAVING_EXPERIMENT_DATA:
             self.save_experiment_data_button[WIDGET_TEXT] = START_SAVING_EXPERIMENT_DATA
             self.save_robot_pose_yes_button[WIDGET_STATE] = NORMAL
             self.save_robot_pose_no_button[WIDGET_STATE] = NORMAL
@@ -1228,6 +1431,8 @@ class UserInterface(BasicNode):
             self.save_image_data_objects_no_button[WIDGET_STATE] = NORMAL
             self.save_image_centroid_yes_button[WIDGET_STATE] = NORMAL
             self.save_image_centroid_no_button[WIDGET_STATE] = NORMAL
+            self.save_skin_error_yes_button[WIDGET_STATE] = NORMAL
+            self.save_skin_error_no_button[WIDGET_STATE] = NORMAL
         else:
             raise Exception("Button text was not recognized.")
 
@@ -1341,7 +1546,7 @@ class UserInterface(BasicNode):
         """
 
         # For each page status, enable/disable each widget accordingly
-        for widget_list, page_status in zip([self.always_visible_frame_widgets,
+        for widget_list, page_status in zip([self.button_controls_frame_widgets,
                                              self.exam_setup_widgets,
                                              self.thyroid_exam_widgets,
                                              self.nodule_exam_widgets],
@@ -1393,7 +1598,12 @@ class UserInterface(BasicNode):
             self.patient_contact_publisher.publish(Bool(bool(self.select_patient_contact_override_variable.get())))
         if self.is_registered_data_override_active:
             self.registered_data_publisher.publish(RegisteredDataMsg())
-        root.after(30, self.publishing_loop)
+        new_msg = TwistStamped()
+        new_msg.header.stamp = Time.now()
+        if self.manual_control_velocity_message is not None:
+            new_msg.twist = self.manual_control_velocity_message
+        self.manual_robot_control_publisher.publish(new_msg)
+        root.after(25, self.publishing_loop)
 
 
 # (ttk.Label(exam_setup_frame, text="Current Set-point (N):"), LEFT_COLUMN, SINGLE_COLUMN, 0, DOUBLE_ROW)

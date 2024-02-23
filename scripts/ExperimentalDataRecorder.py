@@ -25,7 +25,8 @@ from sensor_msgs.msg import Image
 
 # Import custom ROS packages
 from thyroid_ultrasound_support.BasicNode import *
-from thyroid_ultrasound_messages.msg import SaveExperimentDataCommand, Float64MultiArrayStamped, image_data_message
+from thyroid_ultrasound_messages.msg import SaveExperimentDataCommand, Float64MultiArrayStamped, image_data_message, \
+    Float64Stamped
 from thyroid_ultrasound_imaging_support.Validation.date_stamp_str import date_stamp_str
 from thyroid_ultrasound_imaging_support.ImageData.ImageData import ImageData
 
@@ -43,6 +44,7 @@ FORCE: str = 'Force (N)'
 RAW_IMAGE_NAME: str = 'Raw Image Name'
 RAW_IMAGE_ARRAY: str = 'Raw Image Array'
 IMAGE_CENTROID: str = 'Centroid Error in X (m)'
+SKIN_ERROR: str = 'Skin Error Slope'
 
 
 class ExperimentDataRecorder(BasicNode):
@@ -71,7 +73,7 @@ class ExperimentDataRecorder(BasicNode):
         self.current_folder_path = None
 
         # Define a flag to note when data is being saved
-        self.actively_recording_data = False
+        self.actively_queueing_data = False
 
         # Define flags to note which types of data are being saved
         self.record_pose = False
@@ -79,6 +81,7 @@ class ExperimentDataRecorder(BasicNode):
         self.record_raw_image = False
         self.record_image_data_objects = False
         self.record_image_centroid = False
+        self.record_skin_error = False
 
         # Define variables to save where each kind of data is saved
         self.pose_file = None
@@ -89,6 +92,8 @@ class ExperimentDataRecorder(BasicNode):
         self.image_data_objects_folder = None
         self.image_centroid_file = None
         self.image_centroid_file_writer = None
+        self.skin_error_file = None
+        self.skin_error_file_writer = None
 
         # Define variables to store the data that has not been recorded yet
         self.pose_queue = []
@@ -96,6 +101,7 @@ class ExperimentDataRecorder(BasicNode):
         self.raw_image_queue = []
         self.image_data_object_queue = []
         self.image_centroid_queue = []
+        self.skin_error_queue = []
 
         # Create the node
         init_node(EXPERIMENT_DATA_RECORDER)
@@ -121,6 +127,9 @@ class ExperimentDataRecorder(BasicNode):
         # Create a subscriber for the image centroid error
         Subscriber(RC_IMAGE_ERROR, TwistStamped, self.image_centroid_callback)
 
+        # Create a subscriber for the skin error
+        Subscriber(RC_PATIENT_CONTACT_ERROR, Float64Stamped, self.skin_error_callback)
+
     def save_data_command_callback(self, data: SaveExperimentDataCommand):
         """
         Selects which data should be saved based on the fields of the message.
@@ -132,7 +141,22 @@ class ExperimentDataRecorder(BasicNode):
         """
 
         # If any the command has been sent to save any data,
-        if data.save_pose or data.save_force or data.save_raw_image or data.save_image_data or data.save_image_centroid:
+        if data.save_pose or data.save_force or data.save_raw_image or data.save_image_data or \
+                data.save_image_centroid or data.save_skin_error:
+
+            # Clear the queues of any existing data
+            self.pose_queue = []
+            self.force_queue = []
+            self.raw_image_queue = []
+            self.image_data_object_queue = []
+            self.image_centroid_queue = []
+            self.skin_error_queue = []
+
+            # Close any open documents
+            self.close_open_documents()
+
+            # Update that new data is now being queued
+            self.actively_queueing_data = True
 
             # Generate a new data stamp
             date_stamp = date_stamp_str(suffix="")
@@ -194,17 +218,22 @@ class ExperimentDataRecorder(BasicNode):
                 # Update the flag that data needs to be stored
                 self.record_image_centroid = data.save_image_centroid
 
-            # Update that new data is now being recorded
-            self.actively_recording_data = True
+            if data.save_skin_error:
+                # Create a file to save the data in
+                self.skin_error_file = open(self.current_folder_path + 'SkinError_' + date_stamp + '.csv', mode='w')
+                self.skin_error_file_writer = DictWriter(self.skin_error_file, delimiter=',',
+                                                         fieldnames=[MESSAGE_ID, STAMP_SECS, STAMP_NSECS,
+                                                                     SKIN_ERROR])
+                self.skin_error_file_writer.writeheader()
+
+                # Update the flag that data needs to be stored
+                self.record_skin_error = data.save_skin_error
 
         # otherwise
         else:
 
-            # Note that new data is not being recorded anymore
-            self.actively_recording_data = False
-
-            # Close all open documents
-            self.close_open_documents()
+            # Note that new data is not being queued anymore
+            self.actively_queueing_data = False
 
     def robot_pose_callback(self, message: Float64MultiArrayStamped):
         """
@@ -218,7 +247,7 @@ class ExperimentDataRecorder(BasicNode):
         """
 
         # If this data is being recorded
-        if self.record_pose:
+        if self.record_pose and self.actively_queueing_data:
             # Pull the transformation out of the message
             pose = array(message.data.data).reshape((4, 4))
 
@@ -246,7 +275,7 @@ class ExperimentDataRecorder(BasicNode):
             A WrenchStamped message containing the force measured at the end effector in the Z axis.
         """
         # If force data is being recorded
-        if self.record_force:
+        if self.record_force and self.actively_queueing_data:
             # Append the new data to the queue
             self.force_queue.append({MESSAGE_ID: message.header.seq,
                                      STAMP_SECS: message.header.stamp.secs,
@@ -263,7 +292,7 @@ class ExperimentDataRecorder(BasicNode):
             A Image message containing the ultrasound image.
         """
         # If the raw images are being saved
-        if self.record_raw_image:
+        if self.record_raw_image and self.actively_queueing_data:
             # Append the new data to the queue
             self.raw_image_queue.append({RAW_IMAGE_NAME: self.raw_image_folder + 'RawImage_' + str(
                 message.header.seq) + str(message.header.stamp.secs) + '_' + str(message.header.stamp.nsecs) + '.png',
@@ -280,7 +309,7 @@ class ExperimentDataRecorder(BasicNode):
             An image_data_message object containing the filtered ultrasound image
         """
         # If the image data objects are being saved
-        if self.record_image_data_objects:
+        if self.record_image_data_objects and self.actively_queueing_data:
             # Append the new data to the queue
             self.image_data_object_queue.append(ImageData(image_data_msg=message))
 
@@ -294,12 +323,29 @@ class ExperimentDataRecorder(BasicNode):
             A TwistStamped message containing the error of the image_centroid from the center of the image in meters.
         """
         # If image centroid data is being recorded
-        if self.record_image_centroid:
+        if self.record_image_centroid and self.actively_queueing_data:
             # Append the new data to the queue
             self.image_centroid_queue.append({MESSAGE_ID: message.header.seq,
                                               STAMP_SECS: message.header.stamp.secs,
                                               STAMP_NSECS: message.header.stamp.nsecs,
                                               IMAGE_CENTROID: message.twist.linear.x})
+
+    def skin_error_callback(self, msg: Float64Stamped):
+        """
+        Adds the error of the skin contact to the appropriate queue as a slope.
+
+        Parameters
+        ----------
+        msg
+            A Float64Stamped message containing the error of the skin contact line as a slope in pixels.
+        """
+        # If skin error is being recorded
+        if self.record_skin_error and self.actively_queueing_data:
+            # Append the new data to the queue
+            self.skin_error_queue.append({MESSAGE_ID: msg.header.seq,
+                                          STAMP_SECS: msg.header.stamp.secs,
+                                          STAMP_NSECS: msg.header.stamp.nsecs,
+                                          SKIN_ERROR: msg.data.data})
 
     def close_open_documents(self):
         """
@@ -312,36 +358,46 @@ class ExperimentDataRecorder(BasicNode):
             self.force_file.close()
         if self.image_centroid_file is not None:
             self.image_centroid_file.close()
+        if self.skin_error_file is not None:
+            self.skin_error_file.close()
 
     def main_loop(self):
         """
         Performs the main function of the node, saving data while it is available when it has been commanded to.
         """
 
-        # if there is data that needs to be saved
-        if self.actively_recording_data:
-            # If pose data is being recorded and there is new data to record
-            if self.record_pose and len(self.pose_queue) > 0:
-                # Write the new data to the file
-                self.pose_file_writer.writerow(self.pose_queue.pop(-1))
-            # If force data is being recorded and there is new data to record
-            if self.record_force and len(self.force_queue) > 0:
-                # Write the new data to the file
-                self.force_file_writer.writerow(self.force_queue.pop(-1))
-            # If raw image data is being recorded and there is new data to record
-            if self.record_raw_image and len(self.raw_image_queue) > 0:
-                # Save the new image to the folder
-                temp_entry = self.raw_image_queue.pop(-1)
-                imsave(temp_entry[RAW_IMAGE_NAME], temp_entry[RAW_IMAGE_ARRAY])
-            # If image data objects are being recorded and there is new data to record
-            if self.record_image_data_objects and len(self.image_data_object_queue) > 0:
-                # Save the image data object to the folder
-                temp_image_data_object: ImageData = self.image_data_object_queue.pop(-1)
-                temp_image_data_object.save_object_to_file(self.image_data_objects_folder)
-            # If the image centroid is being recorded and there is new data to record
-            if self.record_image_centroid and len(self.image_centroid_queue) > 0:
-                # Write the image centroid to the file
-                self.image_centroid_file_writer.writerow(self.image_centroid_queue.pop(-1))
+        # If pose data is being recorded and there is new data to record
+        if self.record_pose and len(self.pose_queue) > 0 and not self.pose_file.closed:
+            # Write the new data to the file
+            self.pose_file_writer.writerow(self.pose_queue.pop(-1))
+        # If force data is being recorded and there is new data to record
+        if self.record_force and len(self.force_queue) > 0 and not self.force_file.closed:
+            # Write the new data to the file
+            self.force_file_writer.writerow(self.force_queue.pop(-1))
+        # If raw image data is being recorded and there is new data to record
+        if self.record_raw_image and len(self.raw_image_queue) > 0:
+            # Save the new image to the folder
+            temp_entry = self.raw_image_queue.pop(-1)
+            imsave(temp_entry[RAW_IMAGE_NAME], temp_entry[RAW_IMAGE_ARRAY])
+        # If image data objects are being recorded and there is new data to record
+        if self.record_image_data_objects and len(self.image_data_object_queue) > 0:
+            # Save the image data object to the folder
+            temp_image_data_object: ImageData = self.image_data_object_queue.pop(-1)
+            temp_image_data_object.save_object_to_file(self.image_data_objects_folder)
+        # If the image centroid is being recorded and there is new data to record
+        if self.record_image_centroid and len(self.image_centroid_queue) > 0 and not self.image_centroid_file.closed:
+            # Write the image centroid to the file
+            self.image_centroid_file_writer.writerow(self.image_centroid_queue.pop(-1))
+        # If the skin error is being recorded and there is new data to record
+        if self.record_skin_error and len(self.skin_error_queue) > 0 and not self.skin_error_file.closed:
+            # Write the skin error to the file
+            self.skin_error_file_writer.writerow(self.skin_error_queue.pop(-1))
+
+        # If data is not being queued anymore and all queued data has been saved, close the open documents
+        if len(self.pose_queue) == 0 and len(self.force_queue) == 0 and len(self.raw_image_queue) == 0 and \
+                len(self.image_data_object_queue) == 0 and len(self.image_centroid_queue) == 0 \
+                and len(self.skin_error_queue) == 0 and not self.actively_queueing_data:
+            self.close_open_documents()
 
 
 if __name__ == '__main__':

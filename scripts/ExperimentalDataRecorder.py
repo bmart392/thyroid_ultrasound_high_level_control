@@ -6,6 +6,7 @@ File containing the ExperimentDataRecorder class.
 
 # TODO - Dream - Add proper logging through BasicNode class
 # TODO - Dream - Add proper error catching with exceptions
+# TODO - High - Record when a waypoint is reached - Needs testing to confirm successful implementation
 
 # Import standard packages
 from os import mkdir
@@ -45,6 +46,7 @@ RAW_IMAGE_NAME: str = 'Raw Image Name'
 RAW_IMAGE_ARRAY: str = 'Raw Image Array'
 IMAGE_CENTROID: str = 'Centroid Error in X (m)'
 SKIN_ERROR: str = 'Skin Error Slope'
+WAYPOINT_REACHED: str = 'Waypoint Reached'
 
 
 class ExperimentDataRecorder(BasicNode):
@@ -74,6 +76,9 @@ class ExperimentDataRecorder(BasicNode):
 
         # Define a flag to note when data is being saved
         self.actively_queueing_data = False
+
+        # Define a flag to note that a waypoint has been reached
+        self.pose_waypoint_reached = False
 
         # Define flags to note which types of data are being saved
         self.record_pose = False
@@ -130,6 +135,9 @@ class ExperimentDataRecorder(BasicNode):
         # Create a subscriber for the skin error
         Subscriber(RC_PATIENT_CONTACT_ERROR, Float64Stamped, self.skin_error_callback)
 
+        # Create a subscriber for when a waypoint is reached
+        Subscriber(RC_POSITION_GOAL_REACHED, Bool)
+
     def save_data_command_callback(self, data: SaveExperimentDataCommand):
         """
         Selects which data should be saved based on the fields of the message.
@@ -172,7 +180,8 @@ class ExperimentDataRecorder(BasicNode):
                 self.pose_file_writer = DictWriter(self.pose_file, delimiter=',',
                                                    fieldnames=[MESSAGE_ID, STAMP_SECS, STAMP_NSECS,
                                                                POSE_X, POSE_Y, POSE_Z,
-                                                               POSE_ROLL, POSE_PITCH, POSE_YAW])
+                                                               POSE_ROLL, POSE_PITCH, POSE_YAW,
+                                                               WAYPOINT_REACHED])
                 self.pose_file_writer.writeheader()
 
                 # Update the flag that the data needs to be saved
@@ -263,7 +272,12 @@ class ExperimentDataRecorder(BasicNode):
                                     POSE_Z: pose[2, 3],
                                     POSE_ROLL: pose_roll,
                                     POSE_PITCH: pose_pitch,
-                                    POSE_YAW: pose_yaw})
+                                    POSE_YAW: pose_yaw,
+                                    WAYPOINT_REACHED: int(self.pose_waypoint_reached)})
+
+            # Reset the waypoint reached flag
+            if self.pose_waypoint_reached:
+                self.pose_waypoint_reached = False
 
     def robot_force_callback(self, message: WrenchStamped):
         """
@@ -346,6 +360,10 @@ class ExperimentDataRecorder(BasicNode):
                                           STAMP_SECS: msg.header.stamp.secs,
                                           STAMP_NSECS: msg.header.stamp.nsecs,
                                           SKIN_ERROR: msg.data.data})
+
+    def pose_waypoint_reached_callback(self, msg: Bool):
+        """Save the status of reaching the current waypoint goal."""
+        self.pose_waypoint_reached = msg.data
 
     def close_open_documents(self):
         """

@@ -1,23 +1,11 @@
 # Import standard python packages
-from csv import DictReader
 from matplotlib.pyplot import show, subplots, rc
-from matplotlib.patches import Patch
 from numpy.polynomial import Polynomial
+from statistics import median, stdev, mean
 
 # Import custom python packages
 from ExperimentalDataRecorder import MESSAGE_ID, STAMP_SECS, STAMP_NSECS, FORCE
-
-# Define the header used for the combined time-stamp
-COMBINED_STAMP: str = 'Elapsed Time (s)'
-
-# Define the sources of the information
-BASIC_SOURCE_PATH: str = '/home/ben/thyroid_ultrasound_data/experimentation/ForceControl/'
-uncontrolled_time_stamp = '2024-02-19_13-05-58-231870'
-uncontrolled_source_path: str = BASIC_SOURCE_PATH + 'Uncontrolled/' + uncontrolled_time_stamp + \
-                                '_experiment/Force_' + uncontrolled_time_stamp + '.csv'
-controlled_time_stamp = '2024-02-19_13-10-24-970993'
-controlled_source_path: str = BASIC_SOURCE_PATH + 'Controlled/' + controlled_time_stamp + \
-                              '_experiment/Force_' + controlled_time_stamp + '.csv'
+from Graphing.read_recorded_data_csv import read_recorded_data_csv, COMBINED_STAMP, CONTROLLED, UNCONTROLLED
 
 # Set the default size for plot elements
 rc('font', size=10)  # controls default text sizes
@@ -29,103 +17,95 @@ rc('legend', fontsize=10)  # legend font size
 rc('figure', titlesize=24)  # font size of the figure title
 rc('figure', dpi=300)  # Set the DPI of the figure
 
+# Define the sources of the information and choose the colors
+BASIC_SOURCE_PATH: str = '/home/ben/thyroid_ultrasound_data/experimentation/ForceControl/'
+time_stamps = ['2024-02-19_13-05-58-231870', '2024-02-19_13-07-40-867184', '2024-02-19_13-08-56-948372',
+               '2024-02-19_13-10-24-970993', '2024-02-19_13-11-58-761400', '2024-02-19_13-13-17-885949']
+data_types = [UNCONTROLLED, UNCONTROLLED, UNCONTROLLED, CONTROLLED, CONTROLLED, CONTROLLED]
+data_colors = ['lightgray', 'lightgreen', 'mediumpurple', 'peru', 'orange', 'lightskyblue']
+line_colors = ['gray', 'limegreen', 'rebeccapurple', 'saddlebrown', 'darkorange', 'deepskyblue']
+
+# Make sure all data is the right size
+if len(time_stamps) != len(data_colors) != len(line_colors) != len(data_types):
+    raise Exception("Data sources and number of colors do not match for the uncontrolled data.")
+
 # Create a figure and axes to plot the results
 fig, axes = subplots(nrows=1, ncols=1)
 
-# Define a counter to determine which plot to plot on
-axis_counter = 0
+# Define a counter to for the trial number
+trial_number = 1
 
-# Title the figure
-# fig.suptitle('Force Control Experiment')
+# Define a list to store a complete set of controlled data
+completed_controlled_data = []
 
-# Define temporary dictionaries to store each result
-uncontrolled_temp_results_dict = {MESSAGE_ID: [], COMBINED_STAMP: [], FORCE: []}
-controlled_temp_results_dict = {MESSAGE_ID: [], COMBINED_STAMP: [], FORCE: []}
+# Define a list to store the changes in the uncontrolled test
+uncontrolled_data_change = []
 
-# Define final dictionaries to store each result
-uncontrolled_final_results_dict = {MESSAGE_ID: [], COMBINED_STAMP: [], FORCE: []}
-controlled_final_results_dict = {MESSAGE_ID: [], COMBINED_STAMP: [], FORCE: []}
+# For each file
+for time_stamp, data_color, line_color, data_type in zip(time_stamps, data_colors,
+                                                         line_colors, data_types):
 
-# Open the files
-uncontrolled_source_file = open(uncontrolled_source_path, mode='r')
-uncontrolled_source_file_reader = DictReader(uncontrolled_source_file)
-controlled_source_file = open(controlled_source_path, mode='r')
-controlled_source_file_reader = DictReader(controlled_source_file)
+    # Build the path according to the data type
+    if data_type == CONTROLLED:
+        source_path = (BASIC_SOURCE_PATH + 'Controlled/' + time_stamp + '_experiment/Force_' + time_stamp + '.csv')
+    elif data_type == UNCONTROLLED:
+        source_path = (BASIC_SOURCE_PATH + 'Uncontrolled/' + time_stamp + '_experiment/Force_' + time_stamp + '.csv')
+    else:
+        raise Exception(str(data_type) + ' is not a recognized data type.')
 
-# Read in the data
-for uncontrolled_row, controlled_row in zip(uncontrolled_source_file_reader, controlled_source_file_reader):
-    # Pull the data from the uncontrolled test
-    uncontrolled_temp_results_dict[MESSAGE_ID].append(int(uncontrolled_row[MESSAGE_ID]))
-    uncontrolled_temp_results_dict[COMBINED_STAMP].append((int(uncontrolled_row[STAMP_SECS])) +
-                                                      (int(uncontrolled_row[STAMP_NSECS])) / 10 ** 9)
-    uncontrolled_temp_results_dict[FORCE].append(float(uncontrolled_row[FORCE]))
+    # Read the data from the file
+    data = read_recorded_data_csv(file_path=source_path,
+                                  headings=[MESSAGE_ID, STAMP_SECS, STAMP_NSECS, FORCE],
+                                  sort_heading=MESSAGE_ID,
+                                  additional_headings_to_zero=[STAMP_SECS])
 
-    # Pull the data from the controlled test
-    controlled_temp_results_dict[MESSAGE_ID].append(int(controlled_row[MESSAGE_ID]))
-    controlled_temp_results_dict[COMBINED_STAMP].append((int(controlled_row[STAMP_SECS])) +
-                                                    (int(controlled_row[STAMP_NSECS])) / 10 ** 9)
-    controlled_temp_results_dict[FORCE].append(float(controlled_row[FORCE]))
+    # Define the sampling rate for the points included in the plot
+    point_sampling_rate = 20
 
-# Find the smallest values from the data
-uncontrolled_min_stamp = min(uncontrolled_temp_results_dict[COMBINED_STAMP])
-controlled_min_stamp = min(controlled_temp_results_dict[COMBINED_STAMP])
+    # Define variables for convenience
+    data_x = data[COMBINED_STAMP][::point_sampling_rate]
+    data_y = data[FORCE][::point_sampling_rate]
+    data_y_std_dev = stdev(data_y)
 
-# Reset the time stamp to start from 0
-for uncontrolled_message_id, uncontrolled_seconds_stamp, uncontrolled_force, \
-    controlled_message_id, controlled_seconds_stamp, controlled_force in zip(
-        uncontrolled_temp_results_dict[MESSAGE_ID],
-        uncontrolled_temp_results_dict[COMBINED_STAMP],
-        uncontrolled_temp_results_dict[FORCE],
-        controlled_temp_results_dict[MESSAGE_ID],
-        controlled_temp_results_dict[COMBINED_STAMP],
-        controlled_temp_results_dict[FORCE]):
+    # Calculate the line of best fit for the data
+    line_estimation = Polynomial.fit(data_x, data_y, deg=8)
+    estimated_data_y = [line_estimation(x) for x in data_x]
 
-    # Pull the data from the uncontrolled test
-    uncontrolled_final_results_dict[MESSAGE_ID].append(uncontrolled_message_id)
-    uncontrolled_final_results_dict[COMBINED_STAMP].append(uncontrolled_seconds_stamp - uncontrolled_min_stamp)
-    uncontrolled_final_results_dict[FORCE].append(uncontrolled_force)
+    # Plot the line of best fit
+    axes.plot(data_x, estimated_data_y,
+              color=line_color, label='Trial ' + str(trial_number) + ' Data')
+    axes.fill_between(data_x, [y - data_y_std_dev for y in estimated_data_y],
+                      [y + data_y_std_dev for y in estimated_data_y],
+                      alpha=0.1, facecolor=data_color)
 
-    # Pull the data from the controlled test
-    controlled_final_results_dict[MESSAGE_ID].append(controlled_message_id)
-    controlled_final_results_dict[COMBINED_STAMP].append(controlled_seconds_stamp - controlled_min_stamp)
-    controlled_final_results_dict[FORCE].append(controlled_force)
+    # Update the uncontrolled data change
+    if data_type == UNCONTROLLED:
+        uncontrolled_data_change = uncontrolled_data_change + [data[FORCE][-1] - data[FORCE][0]]
 
-# Define the sampling rate for the points included in the plot
-point_sampling_rate = 3
+    # Update the complete controlled data list
+    if data_type == CONTROLLED:
+        completed_controlled_data = completed_controlled_data + data[FORCE]
 
-# Define variables for conveneience
-uncontrolled_x = uncontrolled_final_results_dict[COMBINED_STAMP][::point_sampling_rate]
-uncontrolled_y = uncontrolled_final_results_dict[FORCE][::point_sampling_rate]
+    # Increment the trial number
+    trial_number = trial_number + 1
 
-controlled_x = controlled_final_results_dict[COMBINED_STAMP][::point_sampling_rate]
-controlled_y = controlled_final_results_dict[FORCE][::point_sampling_rate]
-
-# Plot the data
-axes.scatter(uncontrolled_x, uncontrolled_y, s=0.5, c='lightgreen', label='Uncontrolled - Raw Data')
-axes.scatter(controlled_x, controlled_y, s=0.5, c='lightcoral', label='Controlled - Raw Data')
-
-# Calculate the line of best fit for the data
-uncontrolled_line_estimation = Polynomial.fit(uncontrolled_x, uncontrolled_y, deg=8)
-controlled_line_estimation = Polynomial.fit(controlled_x, controlled_y, deg=7)
-
-# uncontrolled_line = poly1d(uncontrolled_line_estimation)
-axes.plot(uncontrolled_x, [uncontrolled_line_estimation(x) for x in uncontrolled_x], 'g--',
-          label='Uncontrolled - Line of Best Fit')
-axes.plot(controlled_x, [controlled_line_estimation(x) for x in controlled_x], 'r--',
-          label='Controlled - Line of Best Fit')
+if len(completed_controlled_data) > 0:
+    print('Median Force Value: ' + str(median(completed_controlled_data)))
+    if len(completed_controlled_data) > 1:
+        print("Standard Deviation of Force Value: " + str(stdev(completed_controlled_data)))
+if len(uncontrolled_data_change) > 0:
+    print('Mean Uncontrolled Change: ' + str(mean(uncontrolled_data_change)))
+    if len(uncontrolled_data_change) > 1:
+        print("Standard Deviation of Uncontrolled Change: " + str(stdev(uncontrolled_data_change)))
 
 # Set the parameters for the figure
 axes.grid(axis='y')
 axes.set_xlabel(COMBINED_STAMP)
 axes.set_ylabel(FORCE)
 
-# Define patches to use for the legend
-uncontrolled_raw_data = Patch(color='lightgreen', label='Uncontrolled Test - Raw Data')
-uncontrolled_line = Patch(color='green', label='Uncontrolled Test - Line of Best Fit')
-controlled_raw_data = Patch(color='lightcoral', label='Controlled Test - Raw Data')
-controlled_line = Patch(color='red', label='Controlled Test - Line of Best Fit')
-
-# Add the lengend
+# Add the legend
 axes.legend()
 
+# Show the plot
 show()
+

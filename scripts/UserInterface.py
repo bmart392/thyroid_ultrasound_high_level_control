@@ -8,7 +8,9 @@ File containing UserInterface class.
 # TODO - Dream - Add robot controls to allow the user to manually scan but keep the image segmentation, force control,
 #  and balance control active
 # TODO - Dream - Add a command to stop all motion and return all states back to the robot not moving
+# TODO - Dream - Add controls to select which visualizations to hide and show
 # TODO - Medium - Add trajectory pause button and activation and deactivation of robot controls
+# TODO - Implement crop from template and have it load the default template - ask if the new image cropping should be saved whenever a new one is made
 
 # Import standard packages
 from tkinter import *
@@ -899,10 +901,14 @@ class UserInterface(BasicNode):
 
         # Get the velocity to give the message
         linear_movement_speed = 0.01
-        angular_movement_speed = 0.1
+        pitch_angular_movement_speed = 0.025
+        yaw_angular_movement_speed = 0.1
 
         # Get the speed factor
         speed_factor = 1.0
+
+        # Define an adjustment for a positive angular speed factor
+        positive_angular_speed_factor = 1.0
 
         # Create the common message
         self.manual_control_velocity_message = Twist()
@@ -918,13 +924,15 @@ class UserInterface(BasicNode):
         elif axis_and_direction == NEGATIVE_Y:
             self.manual_control_velocity_message.linear.y = -linear_movement_speed * speed_factor
         elif axis_and_direction == POSITIVE_PITCH:
-            self.manual_control_velocity_message.angular.y = angular_movement_speed * speed_factor
+            self.manual_control_velocity_message.angular.y = pitch_angular_movement_speed * \
+                                                             positive_angular_speed_factor * speed_factor
         elif axis_and_direction == NEGATIVE_PITCH:
-            self.manual_control_velocity_message.angular.y = -angular_movement_speed * speed_factor
+            self.manual_control_velocity_message.angular.y = -pitch_angular_movement_speed * speed_factor
         elif axis_and_direction == POSITIVE_YAW:
-            self.manual_control_velocity_message.angular.z = angular_movement_speed * speed_factor
+            self.manual_control_velocity_message.angular.z = yaw_angular_movement_speed * \
+                                                             positive_angular_speed_factor * speed_factor
         elif axis_and_direction == NEGATIVE_YAW:
-            self.manual_control_velocity_message.angular.z = -angular_movement_speed * speed_factor
+            self.manual_control_velocity_message.angular.z = -yaw_angular_movement_speed * speed_factor
         else:
             raise Exception(axis_and_direction + " is not a recognized movement direction.")
 
@@ -1464,7 +1472,7 @@ class UserInterface(BasicNode):
         data
             The WrenchStamped message sent by the robot containing the current force experienced by the robot.
         """
-        self.current_force_string_var.set(str(round(data.wrench.force.z, 2)))
+        self.current_force_string_var.set(str(round(data.wrench.force.z, 1)))
 
     def debug_status_messages_callback(self, data: log_message):
         self.update_status(data)

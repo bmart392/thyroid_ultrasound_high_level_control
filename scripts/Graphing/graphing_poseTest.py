@@ -10,18 +10,6 @@ from thyroid_ultrasound_robot_control_support.Helpers.calc_inverse import calc_i
 from thyroid_ultrasound_robot_control_support.Helpers.calc_straight_line_distance import calc_straight_line_distance
 from thyroid_ultrasound_robot_control_support.Helpers.calc_transformation_from_rpy import calc_transformation_from_rpy
 
-# Define helpful constants
-PROBE_X_DISTANCE: str = 'Probe X Position w.r.t.\nStarting Pose (m)'
-PROBE_Y_DISTANCE: str = 'Probe Y Position w.r.t.\nStarting Pose (m)'
-PROBE_Z_DISTANCE: str = 'Probe Z Position w.r.t.\nStarting Pose (m)'
-STRAIGHT_LINE_DISTANCE: str = 'Straight Line Distance (m)'
-COMBINED_STAMP: str = 'Elapsed Time (s)'
-
-# Define the source of the information
-time_stamp = '2024-02-19_13-29-32-391129'
-POSE_FILE_PATH: str = '/home/ben/thyroid_ultrasound_data/experimentation/PoseControl' \
-                      '/' + time_stamp + '_experiment/Pose_' + time_stamp + '.csv'
-
 # Set the default size for plot elements
 rc('font', size=10)  # controls default text sizes
 rc('axes', titlesize=14)  # font size of the axes title
@@ -31,6 +19,21 @@ rc('ytick', labelsize=6)  # font size of the tick labels
 rc('legend', fontsize=10)  # legend font size
 rc('figure', titlesize=24)  # font size of the figure title
 rc('figure', dpi=300)  # Set the DPI of the figure
+
+# Define helpful constants
+PROBE_X_DISTANCE: str = 'Probe X Position w.r.t.\nStarting Pose (m)'
+PROBE_Y_DISTANCE: str = 'Probe Y Position w.r.t.\nStarting Pose (m)'
+PROBE_Z_DISTANCE: str = 'Probe Z Position w.r.t.\nStarting Pose (m)'
+STRAIGHT_LINE_DISTANCE: str = 'Straight Line Distance (m)'
+COMBINED_STAMP: str = 'Elapsed Time (s)'
+
+# Define the source of the information
+time_stamps = ['2024-02-19_13-29-32-391129']
+line_colors = []
+
+time_stamp = '2024-02-19_13-29-32-391129'
+POSE_FILE_PATH: str = '/home/ben/thyroid_ultrasound_data/experimentation/PoseControl' \
+                      '/' + time_stamp + '_experiment/Pose_' + time_stamp + '.csv'
 
 # Create a figure and axes to plot the results
 fig = figure()

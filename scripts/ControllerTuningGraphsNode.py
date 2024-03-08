@@ -6,6 +6,7 @@ File containing ControllerTuningGraphsNode class.
 
 # Import standard ROS packages
 from geometry_msgs.msg import WrenchStamped, TwistStamped
+from armer_msgs.msg import ManipulatorState
 
 # Import standard python packages
 import matplotlib.pyplot as plt
@@ -19,10 +20,14 @@ from thyroid_ultrasound_messages.msg import Float64Stamped
 # Import custom python packages
 from thyroid_ultrasound_support.BasicNode import *
 from thyroid_ultrasound_support.TopicNames import *
+from thyroid_ultrasound_robot_control_support.Helpers.calc_rpy import calc_rpy
+from thyroid_ultrasound_robot_control_support.Helpers.convert_pose_to_transform_matrix import \
+    convert_pose_to_transform_matrix
 
 
 # TODO - Dream - Build in proper logging through BasicNode class
 # TODO - Dream - Add proper exception handling for each part
+# TODO - Dream - Fix the updating of the chart limits
 
 class ControllerTuningGraphsNode(BasicNode):
 
@@ -55,23 +60,38 @@ class ControllerTuningGraphsNode(BasicNode):
         self.latest_force_z_lin_data = 0.0
         self.force_z_lin_set_point = 0.0
 
-        self.latest_force_x_ang_time = 0.0
-        self.latest_force_x_ang_data = 0.0
-        self.force_x_ang_set_point = 0.0
-
         self.latest_img_x_ang_time = 0.0
         self.latest_img_x_ang_data = 0.0
         self.img_x_ang_set_point = 0.0
 
+        self.latest_pos_y_ang_time = 0.0
+        self.latest_pos_y_ang_data = 0.0
+        self.pos_y_ang_set_point = 0.0
+
+        self.latest_pos_z_ang_time = 0.0
+        self.latest_pos_z_ang_data = 0.0
+        self.pos_z_ang_set_point = 0.0
+
+        # Define a flag for when to capture angular pose data
+        self.capture_ang_pose_data = False
+
+        # Define a flag for when to capture the set-points
+        self.show_constant_ang_pose_set_points = False
+
         # Define subscribers for each value that needs to be monitored
         Subscriber(ROBOT_DERIVED_FORCE, WrenchStamped, self.robot_force_callback)
         Subscriber(RC_FORCE_SET_POINT, Float64, self.robot_force_set_point_callback)
-        Subscriber(RC_POSITION_ERROR, Float64Stamped, self.position_error_callback)
+        Subscriber(RC_POSITION_ERROR, TwistStamped, self.position_error_callback)
         Subscriber(RC_IMAGE_ERROR, TwistStamped, self.image_error_callback)
         Subscriber(RC_PATIENT_CONTACT_ERROR, Float64Stamped, self.patient_contact_callback)
+        # Subscriber(ARMER_STATE, ManipulatorState, self.robot_pose_callback)
+
+        # Define subscribers to listen for when to capture angular pose data
+        # Subscriber(CREATE_TRAJECTORY, Float64, self.create_trajectory_command_callback)
+        # Subscriber(CLEAR_TRAJECTORY, Bool, self.clear_trajectory_command_callback)
 
         # Create the figure used for showing the plots
-        self.fig, ax = plt.subplots(2, 2)
+        self.fig, ax = plt.subplots(3, 2)
 
         # Add a title to the window
         self.fig.canvas.manager.set_window_title("PID Controller Graphs")
@@ -93,9 +113,19 @@ class ControllerTuningGraphsNode(BasicNode):
                                                      y_label="Force (N)", x_label="Time (s)")
 
         self.img_x_ang_monitor = ControllerMonitor(ax[1][1], y_axis_limits=(-1., 1),
-                                                   y_axis_limit_multiples=(1., 1.),
+                                                   y_axis_limit_multiples=(0.25, 0.25),
                                                    title="Img - X Angular",
-                                                   y_label="Position Error (m)", x_label="Time (s)")
+                                                   y_label="Slope", x_label="Time (s)")
+
+        self.pos_y_ang_monitor = ControllerMonitor(ax[2][0], y_axis_limits=(-10, 10),
+                                                   y_axis_limit_multiples=(5, 5),
+                                                   title="Pose - Pitch",
+                                                   y_label="Position (deg)", x_label="Time (s)")
+
+        self.pos_z_ang_monitor = ControllerMonitor(ax[2][1], y_axis_limits=(-10, 10),
+                                                   y_axis_limit_multiples=(5, 5),
+                                                   title="Pose - Yaw",
+                                                   y_label="Position (deg)", x_label="Time (s)")
 
         # Create animations for each graph object
         animation.FuncAnimation(self.fig, self.pos_x_lin_monitor.update, self.get_latest_pos_x_lin_values,
@@ -114,12 +144,28 @@ class ControllerTuningGraphsNode(BasicNode):
                                 interval=50,
                                 blit=True, save_count=100)
 
+        animation.FuncAnimation(self.fig, self.pos_y_ang_monitor.update, self.get_latest_pos_y_ang_values,
+                                interval=50,
+                                blit=True, save_count=100)
+
+        animation.FuncAnimation(self.fig, self.pos_z_ang_monitor.update, self.get_latest_pos_z_ang_values,
+                                interval=50,
+                                blit=True, save_count=100)
+
         # Show the plot
         plt.show()
 
-    def position_error_callback(self, msg: Float64Stamped):
+    ##############################
+    # Define ROS message callbacks
+    # region
+
+    def position_error_callback(self, msg: TwistStamped):
         self.latest_pos_x_lin_time = (msg.header.stamp.secs + (msg.header.stamp.nsecs / 10 ** 9)) - self.start_time
-        self.latest_pos_x_lin_data = msg.data.data
+        self.latest_pos_x_lin_data = msg.twist.linear.x
+        self.latest_pos_y_ang_time = self.latest_pos_x_lin_time
+        self.latest_pos_y_ang_data = msg.twist.angular.y
+        self.latest_pos_z_ang_time = self.latest_pos_x_lin_time
+        self.latest_pos_z_ang_data = msg.twist.angular.z
 
     def image_error_callback(self, data: TwistStamped):
         self.latest_img_y_lin_time = (data.header.stamp.secs + (data.header.stamp.nsecs / 10 ** 9)) - self.start_time
@@ -129,9 +175,6 @@ class ControllerTuningGraphsNode(BasicNode):
         self.latest_force_z_lin_time = (data.header.stamp.secs + (data.header.stamp.nsecs / 10 ** 9)) - self.start_time
         self.latest_force_z_lin_data = data.wrench.force.z
 
-        self.latest_force_x_ang_time = self.latest_force_z_lin_time
-        self.latest_force_x_ang_data = data.wrench.torque.x
-
     def patient_contact_callback(self, msg: Float64Stamped):
         self.latest_img_x_ang_time = (msg.header.stamp.secs + (msg.header.stamp.nsecs / 10 ** 9)) - self.start_time
         self.latest_img_x_ang_data = msg.data.data
@@ -139,6 +182,49 @@ class ControllerTuningGraphsNode(BasicNode):
     def robot_force_set_point_callback(self, data: Float64):
         self.force_z_lin_set_point = data.data
 
+    """def robot_pose_callback(self, message: ManipulatorState):
+        
+        Adds the robot pose to the queue of data to be recorded as x ,y, z, roll, pitch, yaw data points.
+
+        Parameters
+        ----------
+        message
+            A Float64MultiArrayStamped message containing the pose of the robot as a 4x4 homogeneous
+            transformation matrix.
+        
+
+        # if self.capture_ang_pose_data:
+
+        # Pull out the timestamp
+        self.latest_pos_y_ang_time = (message.ee_pose.header.stamp.secs +
+                                      (message.ee_pose.header.stamp.nsecs / 10 ** 9)) - self.start_time
+        self.latest_pos_z_ang_time = self.latest_pos_y_ang_time
+
+        # Pull the transformation out of the message
+        pose = convert_pose_to_transform_matrix(message.ee_pose.pose)
+
+        # Calculate the roll, pitch, and yaw of the pose
+        pose_roll, pose_pitch, pose_yaw = calc_rpy(pose[0:3, 0:3])
+
+        # Set the latest data points
+        self.latest_pos_y_ang_data = pose_pitch
+        self.latest_pos_z_ang_data = pose_yaw
+
+        if not self.show_constant_ang_pose_set_points:
+            self.pos_y_ang_set_point = self.latest_pos_y_ang_data
+            self.pos_z_ang_set_point = self.latest_pos_z_ang_data
+
+    def create_trajectory_command_callback(self, _):
+        self.show_constant_ang_pose_set_points = True
+
+    def clear_trajectory_command_callback(self, _):
+        self.show_constant_ang_pose_set_points = False"""
+
+    # endregion
+
+    ############################
+    # Define animation callbacks
+    # region
     def get_latest_pos_x_lin_values(self):
         yield self.latest_pos_x_lin_time, self.latest_pos_x_lin_data, self.pos_x_lin_set_point
 
@@ -148,11 +234,16 @@ class ControllerTuningGraphsNode(BasicNode):
     def get_latest_force_z_lin_values(self):
         yield self.latest_force_z_lin_time, self.latest_force_z_lin_data, self.force_z_lin_set_point
 
-    def get_latest_force_x_ang_values(self):
-        yield self.latest_force_x_ang_time, self.latest_force_x_ang_data, self.force_x_ang_set_point
-
     def get_latest_img_x_ang_values(self):
         yield self.latest_img_x_ang_time, self.latest_img_x_ang_data, self.img_x_ang_set_point
+
+    def get_latest_pos_y_ang_values(self):
+        yield self.latest_pos_y_ang_time, self.latest_pos_y_ang_data, self.pos_y_ang_set_point
+
+    def get_latest_pos_z_ang_values(self):
+        yield self.latest_pos_z_ang_time, self.latest_pos_z_ang_data, self.pos_z_ang_set_point
+
+    # endregion
 
     def shutdown_node(self):
         """
@@ -261,8 +352,6 @@ class ControllerMonitor:
             if set_point_upper_limit > actual_data_upper_limit:
                 # Save the new upper limit
                 new_upper_limit = set_point_upper_limit"""
-
-        # TODO Fix the updating of these limits
 
         # Create a variable to save a new lower limit if it is needed
         new_lower_limit = (-0.5 + floor(min([min(self.actual_value_data), min(self.set_point_data)]) /

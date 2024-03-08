@@ -6,7 +6,7 @@ File containing the ExperimentDataRecorder class.
 
 # TODO - Dream - Add proper logging through BasicNode class
 # TODO - Dream - Add proper error catching with exceptions
-# TODO - High - Record when a waypoint is reached - Needs testing to confirm successful implementation
+# TODO - High - Test that it is recorded when a waypoint is reached
 
 # Import standard packages
 from os import mkdir
@@ -23,6 +23,9 @@ from thyroid_ultrasound_imaging_support.ImageData.convert_image_message_to_array
 from thyroid_ultrasound_robot_control_support.Helpers.calc_rpy import calc_rpy
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
+from armer_msgs.msg import ManipulatorState
+from thyroid_ultrasound_robot_control_support.Helpers.convert_pose_to_transform_matrix import \
+    convert_pose_to_transform_matrix
 
 # Import custom ROS packages
 from thyroid_ultrasound_support.BasicNode import *
@@ -117,9 +120,6 @@ class ExperimentDataRecorder(BasicNode):
         # Define the command subscribers
         Subscriber(EXP_SAVE_DATA_COMMAND, SaveExperimentDataCommand, self.save_data_command_callback)
 
-        # Create a subscriber for the robot pose
-        Subscriber(ROBOT_DERIVED_POSE, Float64MultiArrayStamped, self.robot_pose_callback)
-
         # Create a subscriber for the robot force
         Subscriber(ROBOT_DERIVED_FORCE, WrenchStamped, self.robot_force_callback)
 
@@ -137,6 +137,9 @@ class ExperimentDataRecorder(BasicNode):
 
         # Create a subscriber for when a waypoint is reached
         Subscriber(RC_POSITION_GOAL_REACHED, Bool)
+
+        # Create a subscriber to listen for the robot transformation
+        Subscriber(ARMER_STATE, ManipulatorState, self.robot_pose_callback)
 
     def save_data_command_callback(self, data: SaveExperimentDataCommand):
         """
@@ -244,7 +247,7 @@ class ExperimentDataRecorder(BasicNode):
             # Note that new data is not being queued anymore
             self.actively_queueing_data = False
 
-    def robot_pose_callback(self, message: Float64MultiArrayStamped):
+    def robot_pose_callback(self, message: ManipulatorState):
         """
         Adds the robot pose to the queue of data to be recorded as x ,y, z, roll, pitch, yaw data points.
 
@@ -258,15 +261,15 @@ class ExperimentDataRecorder(BasicNode):
         # If this data is being recorded
         if self.record_pose and self.actively_queueing_data:
             # Pull the transformation out of the message
-            pose = array(message.data.data).reshape((4, 4))
+            pose = convert_pose_to_transform_matrix(message.ee_pose.pose)
 
             # Calculate the roll, pitch, and yaw of the pose
             pose_roll, pose_pitch, pose_yaw = calc_rpy(pose[0:3, 0:3])
 
             # Append the new data to the queue
-            self.pose_queue.append({MESSAGE_ID: message.header.seq,
-                                    STAMP_SECS: message.header.stamp.secs,
-                                    STAMP_NSECS: message.header.stamp.nsecs,
+            self.pose_queue.append({MESSAGE_ID: message.ee_pose.header.seq,
+                                    STAMP_SECS: message.ee_pose.header.stamp.secs,
+                                    STAMP_NSECS: message.ee_pose.header.stamp.nsecs,
                                     POSE_X: pose[0, 3],
                                     POSE_Y: pose[1, 3],
                                     POSE_Z: pose[2, 3],

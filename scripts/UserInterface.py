@@ -3,7 +3,6 @@
 """
 File containing UserInterface class.
 """
-
 # TODO - Dream - Turn this into a better error logging device. Show message, time sent, and node sending
 # TODO - Dream - Create an option to see minimal, standard, or verbose logging data.
 # TODO - Dream - Add a command to stop all motion and return all states back to the robot not moving
@@ -17,15 +16,15 @@ from tkinter.scrolledtext import ScrolledText
 from tkinter.filedialog import askdirectory
 import tkinter.ttk as ttk
 from argparse import ArgumentParser
+from os.path import isdir
 
 # Import ROS packages
 from geometry_msgs.msg import WrenchStamped, TwistStamped, Twist
-from std_msgs.msg import UInt8, Int8
+from std_msgs.msg import Int8
 
 # Import custom ROS packages
 from thyroid_ultrasound_support.BasicNode import *
-from thyroid_ultrasound_support.TopicNames import *
-from thyroid_ultrasound_messages.msg import SaveExperimentDataCommand, RegisteredDataMsg
+from thyroid_ultrasound_messages.msg import SaveExperimentDataCommand
 
 # Define constants used for logging purposes
 VERBOSE: int = int(0)
@@ -53,13 +52,25 @@ START_SAVING_IMAGES: str = "Start Saving Images"
 STOP_SAVING_IMAGES: str = "Stop Saving Images"
 START_SENDING_OVERRIDE_VALUE: str = "Start sending\noverride value"
 STOP_SENDING_OVERRIDE_VALUE: str = "Stop sending\noverride value"
-START_SENDING_REGISTERED_DATA_OVERRIDE_VALUE: str = "Start sending registered data override value"
-STOP_SENDING_REGISTERED_DATA_OVERRIDE_VALUE: str = "Stop sending registered data override value"
+START_SENDING_PATIENT_CONTACT_OVERRIDE_VALUE: str = "Start overriding patient contact value"
+STOP_SENDING_PATIENT_CONTACT_OVERRIDE_VALUE: str = "Stop overriding patient contact value"
+START_SENDING_FORCE_CONTROL_OVERRIDE_VALUE: str = "Start overriding force control value"
+STOP_SENDING_FORCE_CONTROL_OVERRIDE_VALUE: str = "Stop overriding force control value"
+START_SENDING_REGISTERED_DATA_OVERRIDE_VALUE: str = "Start overriding registered data value"
+STOP_SENDING_REGISTERED_DATA_OVERRIDE_VALUE: str = "Stop overriding registered data value"
+START_SENDING_IMAGE_CENTERED_OVERRIDE_VALUE: str = "Start overriding image centered value"
+STOP_SENDING_IMAGE_CENTERED_OVERRIDE_VALUE: str = "Stop overriding image centered value"
+START_SENDING_IMAGE_BALANCED_OVERRIDE_VALUE: str = "Start overriding image balanced value"
+STOP_SENDING_IMAGE_BALANCED_OVERRIDE_VALUE: str = "Stop overriding image balanced value"
 START_SAVING_EXPERIMENT_DATA: str = "Start saving\nexperiment data"
 STOP_SAVING_EXPERIMENT_DATA: str = "Stop saving\nexperiment data"
 TOGGLE_SAVING_EXPERIMENT_DATA: str = "Toggle saving\nexperiment data"
 START_CREATING_VELOCITY_NOISE: str = "Start creating\nvelocity noise"
 STOP_CREATING_VELOCITY_NOISE: str = "Stop creating\nvelocity noise"
+PLAYBACK_STREAM_IN_CHRONOLOGICAL_ORDER: str = "Playback images in chronological order."
+PLAYBACK_STREAM_IN_REVERSE_CHRONOLOGICAL_ORDER: str = "Playback images in reverse chronological order."
+START_PUBLISHING_CONTROLLER_STATUS_VALUES: str = "Start publishing controller status values."
+STOP_PUBLISHING_CONTROLLER_STATUS_VALUES: str = "Stop publishing controller status values."
 
 # Define constants for parameters of widgets
 WIDGET_TEXT: str = 'text'
@@ -144,101 +155,89 @@ class UserInterface(BasicNode):
         # region
 
         # Startup the node
-        init_node('UserInterface')
+        init_node(USER_INTERFACE)
 
         # Define custom shutdown behavior
         on_shutdown(self.shutdown_node)
 
-        # Create subscribers to listen to the PID values from the robot control node
-        self.pid_controller_publisher = Publisher(CONTROLLER_SELECTOR, UInt8, queue_size=1)
-        Subscriber(P_GAIN_CURRENT, Float64, self.p_gain_message_callback)
-        Subscriber(I_GAIN_CURRENT, Float64, self.i_gain_message_callback)
-        Subscriber(D_GAIN_CURRENT, Float64, self.d_gain_message_callback)
-        self.p_gain_publisher = Publisher(P_GAIN_SETTING, Float64, queue_size=1)
-        self.i_gain_publisher = Publisher(I_GAIN_SETTING, Float64, queue_size=1)
-        self.d_gain_publisher = Publisher(D_GAIN_SETTING, Float64, queue_size=1)
+        # Wait for the services to be built
+        wait_for_service(IPR_REGISTERED_DATA_SAVE_LOCATION)
+        wait_for_service(NRTS_REGISTERED_DATA_LOAD_LOCATION)
+        wait_for_service(VG_VOLUME_DATA_SAVE_LOCATION)
+        # wait_for_service(TM_OVERRIDE_PATIENT_CONTACT)
+        # wait_for_service(TM_OVERRIDE_FORCE_CONTROL)
+        # wait_for_service(TM_OVERRIDE_IMAGE_BALANCED)
+        # wait_for_service(TM_OVERRIDE_IMAGE_CENTERED)
+        # wait_for_service(TM_OVERRIDE_DATA_REGISTERED)
+        # wait_for_service(RC_OVERRIDE_PATIENT_CONTACT)
+        # wait_for_service(RC_OVERRIDE_FORCE_CONTROL)
+        # wait_for_service(RC_OVERRIDE_IMAGE_BALANCED)
+        # wait_for_service(RC_OVERRIDE_IMAGE_CENTERED)
+        # wait_for_service(CREATE_TRAJECTORY)
+        # wait_for_service(CLEAR_TRAJECTORY)
+        # wait_for_service(REGISTERED_DATA_SAVE_LOCATION)
+        try:
 
-        # Create a publisher to publish the overall speed factor for the robot
-        self.speed_selector_publisher = Publisher(RC_OVERALL_ROBOT_SPEED, Float64, queue_size=1)
+            # Define the trajectory management node client proxies
+            self.tm_override_patient_contact_service = ServiceProxy(TM_OVERRIDE_PATIENT_CONTACT, BoolRequest)
+            self.tm_override_force_control_service = ServiceProxy(TM_OVERRIDE_FORCE_CONTROL, BoolRequest)
+            self.tm_override_image_balanced_service = ServiceProxy(TM_OVERRIDE_IMAGE_BALANCED, BoolRequest)
+            self.tm_override_image_centered_service = ServiceProxy(TM_OVERRIDE_IMAGE_CENTERED, BoolRequest)
+            self.tm_override_data_registered_service = ServiceProxy(TM_OVERRIDE_DATA_REGISTERED, BoolRequest)
+            self.create_trajectory_service = ServiceProxy(TM_CREATE_TRAJECTORY, Float64Request)
+            self.clear_trajectory_service = ServiceProxy(TM_CLEAR_TRAJECTORY, BoolRequest)
+            self.registered_data_save_location_service = ServiceProxy(IPR_REGISTERED_DATA_SAVE_LOCATION, StringRequest)
 
-        # Create a publisher to publish the command to use image feedback
-        self.use_image_feedback_command_publisher = Publisher(USE_IMAGE_FEEDBACK, Bool, queue_size=1)
+            # Define the robot control node client proxies
+            self.rc_override_patient_contact_service = ServiceProxy(RC_OVERRIDE_PATIENT_CONTACT, BoolRequest)
+            self.view_controller_gains_service = ServiceProxy(RC_VIEW_CONTROLLER_GAINS, ViewControllerGains)
+            self.set_controller_gains_service = ServiceProxy(RC_SET_CONTROLLER_GAINS, SetControllerGains)
+            self.speed_selector_service = ServiceProxy(RC_OVERALL_ROBOT_SPEED, Float64Request)
+            self.use_pose_feedback_command_service = ServiceProxy(RC_USE_POSE_CONTROL, BoolRequest)
+            self.use_force_feedback_command_service = ServiceProxy(RC_USE_FORCE_CONTROL, BoolRequest)
+            self.use_image_feedback_command_service = ServiceProxy(RC_USE_IMAGE_CENTERING, BoolRequest)
+            self.use_balancing_feedback_command_service = ServiceProxy(RC_USE_IMAGE_BALANCING, BoolRequest)
+            self.publish_controller_statuses_service = ServiceProxy(RC_PUBLISH_CONTROLLER_STATUSES, BoolRequest)
 
-        # Create a publisher to publish the command to use force feedback
-        self.use_force_feedback_command_publisher = Publisher(USE_FORCE_FEEDBACK, Bool,
-                                                              queue_size=1)
+        except ServiceException:
+            pass
 
-        # Create a publisher to publish the command to use balancing feedback
-        self.use_balancing_feedback_command_publisher = Publisher(USE_BALANCING_FEEDBACK, Bool,
-                                                                  queue_size=1)
+        # Define the clarius control node client proxies
+        self.send_image_saving_command_service = ServiceProxy(CC_SAVE_IMAGES, BoolRequest)
+        self.send_folder_destination_service = ServiceProxy(CC_SAVED_IMAGES_DESTINATION, StringRequest)
+
+        # Define the clarius spoof node client proxies
+        if passed_arguments.testing_mode:
+            self.image_streaming_location_service = ServiceProxy(CS_IMAGE_LOCATION, StringRequest)
+            self.image_streaming_command_service = ServiceProxy(CS_IMAGE_STREAMING_CONTROL, BoolRequest)
+            self.restart_image_streaming_command_service = ServiceProxy(CS_IMAGE_STREAMING_RESTART, BoolRequest)
+            self.reverse_stream_order_service = ServiceProxy(CS_IMAGE_STREAMING_REVERSE_PLAYBACK_DIRECTION, BoolRequest)
+
+        # Define the image based user input node service proxies
+        self.generate_new_image_cropping_command_service = ServiceProxy(IB_UI_CROP_IMAGE_FROM_POINTS, BoolRequest)
+        self.load_existing_image_cropping_command_service = ServiceProxy(IB_UI_CROP_IMAGE_FROM_TEMPLATE,
+                                                                         BoolRequest)
+        self.identify_thyroid_from_points_command_service = ServiceProxy(IB_UI_IDENTIFY_THYROID_FROM_POINTS,
+                                                                         BoolRequest)
+
+        # Define the non-real-time segmentation node service proxies
+        self.registered_data_load_location_service = ServiceProxy(NRTS_REGISTERED_DATA_LOAD_LOCATION, StringRequest)
+        self.nrts_generate_volume_command_service = ServiceProxy(NRTS_GENERATE_VOLUME, BoolRequest)
+
+        # Define the volume generation node service proxies
+        self.vg_generate_volume_command_service = ServiceProxy(VG_GENERATE_VOLUME, BoolRequest)
+        self.display_loaded_volume_command_service = ServiceProxy(VG_DISPLAY_VOLUME, BoolRequest)
+        self.volume_data_save_location_service = ServiceProxy(VG_VOLUME_DATA_SAVE_LOCATION, StringRequest)
+        self.volume_data_load_location_service = ServiceProxy(VG_VOLUME_DATA_LOAD_LOCATION, StringRequest)
 
         # Create a publisher to publish the command to start and stop the robot motion
-        self.stop_robot_motion_command_publisher = Publisher(STOP_ALL_MOTION, Bool, queue_size=1)
-
-        # Create a publisher to publish the command to generate a new image cropping
-        self.generate_new_image_cropping_command_publisher = Publisher(CROP_IMAGE_FROM_POINTS, Bool,
-                                                                       queue_size=1)
-
-        # Create a publisher to publish the command to identify the thyroid with points
-        self.identify_thyroid_from_points_command_publisher = Publisher(IDENTIFY_THYROID_FROM_POINTS, Bool,
-                                                                        queue_size=1)
-
-        # Create a publisher to publish the command to use a template to identify the thyroid with a template
-        self.identify_thyroid_from_template_command_publisher = Publisher(IDENTIFY_THYROID_FROM_TEMPLATE,
-                                                                          Bool, queue_size=1)
-
-        # Create a publisher to publish the command to have the user generate the threshold parameters of the
-        # thresholding filter
-        self.generate_threshold_filter_parameters_command_publisher = Publisher(
-            GENERATE_THRESHOLD_PARAMETERS, Bool, queue_size=1)
+        # self.stop_robot_motion_command_publisher = Publisher(STOP_ALL_MOTION, Bool, queue_size=1)
 
         # Create a publisher to publish the desired force for the robot to exert
         self.force_set_point_publisher = Publisher(RC_FORCE_SET_POINT, Float64, queue_size=1)
 
-        # Create a publisher to publish the command to start and stop streaming images
-        self.image_streaming_command_publisher = Publisher(IMAGE_STREAMING_CONTROL, Bool, queue_size=1)
-
-        # Create a publisher to publish the command to start and stop streaming images
-        self.restart_image_streaming_command_publisher = Publisher(IMAGE_STREAMING_RESTART, Bool,
-                                                                   queue_size=1)
-
-        # Create a publisher to publish the command to test the force profile
-        self.test_force_profile_publisher = Publisher(TEST_FORCE_PROFILE, Bool, queue_size=1)
-
-        # Create a publisher to publish the command to load image crop coordinates from a file
-        self.load_existing_image_cropping_command_publisher = Publisher(CROP_IMAGE_FROM_TEMPLATE,
-                                                                        Bool, queue_size=1)
-
-        # Create a publisher to publish the command to scan upwards
-        self.scan_command_publisher = Publisher(CREATE_TRAJECTORY, Float64, queue_size=1)
-
-        # Create a publisher to publish the command to clear the current trajectory
-        self.clear_trajectory_command_publisher = Publisher(CLEAR_TRAJECTORY, Bool, queue_size=1)
-
-        # Create a publisher to publish the command to complete a full scan
-        self.complete_full_scan_command_publisher = Publisher(COMPLETE_FULL_SCAN, Bool, queue_size=1)
-
-        # Create a publisher to publish the command to generate a volume
-        self.generate_volume_command_publisher = Publisher(GENERATE_VOLUME, Bool, queue_size=1)
-
-        # Create a publisher to publish the command to display the generated volume
-        self.display_volume_command_publisher = Publisher(DISPLAY_VOLUME, Bool, queue_size=1)
-
         # Create a publisher to publish the imaging depth of the US probe
         self.imaging_depth_publisher = Publisher(IMAGE_DEPTH, Float64, queue_size=1)
-
-        # Create a publisher to publish the command to use pose feedback
-        self.use_pose_feedback_command_publisher = Publisher(USE_POSE_FEEDBACK, Bool, queue_size=1)
-
-        self.send_image_saving_command_publisher = Publisher(SAVE_IMAGES, Bool, queue_size=1)
-
-        self.send_folder_destination_publisher = Publisher(SAVED_IMAGES_DESTINATION, String, queue_size=1)
-
-        # Create a publisher to publish an override signal if the patient is in the image
-        self.patient_contact_publisher = Publisher(IMAGE_PATIENT_CONTACT, Bool, queue_size=1)
-
-        # Create a publisher to publish an override signal for the registered data
-        self.registered_data_publisher = Publisher(REGISTERED_DATA_REAL_TIME, RegisteredDataMsg, queue_size=1)
 
         # Define command publishers for saving experiment data
         self.save_experiment_data_command_publisher = Publisher(EXP_SAVE_DATA_COMMAND, SaveExperimentDataCommand,
@@ -246,15 +245,6 @@ class UserInterface(BasicNode):
 
         # Define a command to start publishing random velocity noise
         self.create_noise_command_publisher = Publisher(EXP_CREATE_NOISE_COMMAND, Bool, queue_size=1)
-
-        # Define a publisher for publishing the location in which to save registered data
-        self.registered_data_save_location_publisher = Publisher(REGISTERED_DATA_SAVE_LOCATION, String, queue_size=1)
-
-        # Define a publisher for publishing the location from which to load registered data
-        self.registered_data_load_location_publisher = Publisher(REGISTERED_DATA_LOAD_LOCATION, String, queue_size=1)
-
-        # Define a publisher for publishing the location in which to save volume data
-        self.volume_data_save_location_publisher = Publisher(VOLUME_DATA_SAVE_LOCATION, String, queue_size=1)
 
         # Define a publisher for publishing robot control velocity commands
         self.manual_robot_control_publisher = Publisher(RC_MANUAL_CONTROL_INPUT, TwistStamped, queue_size=1)
@@ -269,7 +259,12 @@ class UserInterface(BasicNode):
         Subscriber(LOGGING, log_message, self.debug_status_messages_callback)
 
         # Create a subscriber to listen for when the trajectory has been completed
-        Subscriber(RC_TRAJECTORY_COMPLETE, Bool, self.trajectory_complete_callback)
+        Service(UI_TRAJECTORY_COMPLETE, BoolRequest, self.trajectory_complete_handler)
+
+        # Create subscribers to listen for the progress of the volume generation node
+        Subscriber(EXP_ALL_DATA_SAVED, Bool, self.all_data_saved_callback)
+        Subscriber(EXP_DATA_REMAINING_TO_SAVE, String, self.remaining_data_callback)
+        Subscriber(VOLUME_DATA, Float64, self.volume_data_result_callback)
 
         # endregion
         # ---------------------------------------
@@ -313,7 +308,7 @@ class UserInterface(BasicNode):
         # Add the frames to the tab controller
         tab_controller.add(exam_setup_frame, text="Exam Setup")
         tab_controller.add(thyroid_exam_frame, text="Thyroid Exam")
-        tab_controller.add(nodule_exam_frame, text="Nodule Exam")
+        # tab_controller.add(nodule_exam_frame, text="Nodule Exam")
         tab_controller.add(status_logging_frame, text="Status Logger")
         if passed_arguments.experimentation_mode:
             tab_controller.add(developer_frame, text="Developer")
@@ -329,13 +324,14 @@ class UserInterface(BasicNode):
         # If in testing mode, add the streaming buttons
         if passed_arguments.testing_mode:
             self.image_streaming_button = ttk.Button(button_controls_frame, text=START_IMAGE_STREAMING,
-                                                     command=self.image_streaming_button_callback)
+                                                     command=self.image_streaming_button_callback,
+                                                     state=DISABLED)
             aa = create_widget_object(self.image_streaming_button,
                                       col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
                                       row_num=aa, row_span=SINGLE_ROW)
             self.restart_image_streaming_button = ttk.Button(button_controls_frame, text="Restart\nImage Streaming",
                                                              command=self.restart_image_streaming_button_callback,
-                                                             )
+                                                             state=DISABLED)
             aa = create_widget_object(self.restart_image_streaming_button,
                                       col_num=LL_MIDDLE_COLUMN, col_span=SINGLE_COLUMN,
                                       row_num=aa, row_span=SINGLE_ROW)
@@ -371,30 +367,23 @@ class UserInterface(BasicNode):
         # region
         bb = 0
 
-        # Define the positive yaw widget
-        self.positive_yaw_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_YAW, width=5)
-        self.positive_yaw_movement_button.bind(BUTTON_PRESS,
-                                               lambda event, axis_and_direction=POSITIVE_YAW:
-                                               self.robot_control_button_callback(
-                                                   axis_and_direction=axis_and_direction))
-        self.positive_yaw_movement_button.bind(BUTTON_RELEASE,
-                                               lambda event, axis_and_direction=NO_MOVEMENT:
-                                               self.robot_control_button_callback(
-                                                   axis_and_direction=axis_and_direction))
-        bb = create_widget_object(self.positive_yaw_movement_button, col_num=RL_MIDDLE_COLUMN, row_num=bb)
+        # Define the label for the section
+        bb = create_widget_object(ttk.Label(robot_controls_frame, text="Manual Robot Controls",
+                                            anchor=CENTER, justify=CENTER),
+                                  col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                  row_num=bb, increment_row=True)
 
-        # Define the negative yaw widget
-        self.negative_yaw_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_YAW, width=5)
-        self.negative_yaw_movement_button.bind(BUTTON_PRESS,
-                                               lambda event, axis_and_direction=NEGATIVE_YAW:
-                                               self.robot_control_button_callback(
-                                                   axis_and_direction=axis_and_direction))
-        self.negative_yaw_movement_button.bind(BUTTON_RELEASE,
-                                               lambda event, axis_and_direction=NO_MOVEMENT:
-                                               self.robot_control_button_callback(
-                                                   axis_and_direction=axis_and_direction))
-        bb = create_widget_object(self.negative_yaw_movement_button, col_num=LR_MIDDLE_COLUMN, row_num=bb,
-                                  increment_row=True)
+        bb = create_horizontal_separator(robot_controls_frame, bb)
+
+        # Define the negative x widget
+        self.negative_x_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_X, width=5)
+        self.negative_x_movement_button.bind(BUTTON_PRESS,
+                                             lambda event, axis_and_direction=NEGATIVE_X:
+                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+        self.negative_x_movement_button.bind(BUTTON_RELEASE,
+                                             lambda event, axis_and_direction=NO_MOVEMENT:
+                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+        bb = create_widget_object(self.negative_x_movement_button, col_num=LEFT_COLUMN, row_num=bb)
 
         # Define the positive x widget
         self.positive_x_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_X, width=5)
@@ -404,7 +393,33 @@ class UserInterface(BasicNode):
         self.positive_x_movement_button.bind(BUTTON_RELEASE,
                                              lambda event, axis_and_direction=NO_MOVEMENT:
                                              self.robot_control_button_callback(axis_and_direction=axis_and_direction))
-        bb = create_widget_object(self.positive_x_movement_button, col_num=MIDDLE_COLUMN, row_num=bb)
+        bb = create_widget_object(self.positive_x_movement_button, col_num=RIGHT_COLUMN, row_num=bb,
+                                  increment_row=True)
+
+        bb = create_horizontal_separator(robot_controls_frame, bb)
+
+        # Define the negative y widget
+        self.negative_y_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_Y, width=5)
+        self.negative_y_movement_button.bind(BUTTON_PRESS,
+                                             lambda event, axis_and_direction=NEGATIVE_Y:
+                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+        self.negative_y_movement_button.bind(BUTTON_RELEASE,
+                                             lambda event, axis_and_direction=NO_MOVEMENT:
+                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+        bb = create_widget_object(self.negative_y_movement_button, col_num=LEFT_COLUMN, row_num=bb)
+
+        # Define the positive y widget
+        self.positive_y_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_Y, width=5)
+        self.positive_y_movement_button.bind(BUTTON_PRESS,
+                                             lambda event, axis_and_direction=POSITIVE_Y:
+                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+        self.positive_y_movement_button.bind(BUTTON_RELEASE,
+                                             lambda event, axis_and_direction=NO_MOVEMENT:
+                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+        bb = create_widget_object(self.positive_y_movement_button, col_num=RIGHT_COLUMN, row_num=bb,
+                                  increment_row=True)
+
+        bb = create_horizontal_separator(robot_controls_frame, bb)
 
         # Define the negative pitch widget
         self.negative_pitch_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_PITCH, width=5)
@@ -416,39 +431,7 @@ class UserInterface(BasicNode):
                                                  lambda event, axis_and_direction=NO_MOVEMENT:
                                                  self.robot_control_button_callback(
                                                      axis_and_direction=axis_and_direction))
-        bb = create_widget_object(self.negative_pitch_movement_button, col_num=RR_MIDDLE_COLUMN, row_num=bb,
-                                  increment_row=True)
-
-        # Define the positive y widget
-        self.positive_y_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_Y, width=5)
-        self.positive_y_movement_button.bind(BUTTON_PRESS,
-                                             lambda event, axis_and_direction=POSITIVE_Y:
-                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
-        self.positive_y_movement_button.bind(BUTTON_RELEASE,
-                                             lambda event, axis_and_direction=NO_MOVEMENT:
-                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
-        bb = create_widget_object(self.positive_y_movement_button, col_num=RL_MIDDLE_COLUMN, row_num=bb)
-
-        # Define the negative y widget
-        self.negative_y_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_Y, width=5)
-        self.negative_y_movement_button.bind(BUTTON_PRESS,
-                                             lambda event, axis_and_direction=NEGATIVE_Y:
-                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
-        self.negative_y_movement_button.bind(BUTTON_RELEASE,
-                                             lambda event, axis_and_direction=NO_MOVEMENT:
-                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
-        bb = create_widget_object(self.negative_y_movement_button, col_num=LR_MIDDLE_COLUMN, row_num=bb,
-                                  increment_row=True)
-
-        # Define the negative x widget
-        self.negative_x_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_X, width=5)
-        self.negative_x_movement_button.bind(BUTTON_PRESS,
-                                             lambda event, axis_and_direction=NEGATIVE_X:
-                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
-        self.negative_x_movement_button.bind(BUTTON_RELEASE,
-                                             lambda event, axis_and_direction=NO_MOVEMENT:
-                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
-        bb = create_widget_object(self.negative_x_movement_button, col_num=MIDDLE_COLUMN, row_num=bb)
+        bb = create_widget_object(self.negative_pitch_movement_button, col_num=LEFT_COLUMN, row_num=bb)
 
         # Define the positive pitch button
         self.positive_pitch_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_PITCH, width=5)
@@ -460,7 +443,34 @@ class UserInterface(BasicNode):
                                                  lambda event, axis_and_direction=NO_MOVEMENT:
                                                  self.robot_control_button_callback(
                                                      axis_and_direction=axis_and_direction))
-        bb = create_widget_object(self.positive_pitch_movement_button, col_num=RR_MIDDLE_COLUMN, row_num=bb,
+        bb = create_widget_object(self.positive_pitch_movement_button, col_num=RIGHT_COLUMN, row_num=bb,
+                                  increment_row=True)
+
+        bb = create_horizontal_separator(robot_controls_frame, bb)
+
+        # Define the negative yaw widget
+        self.negative_yaw_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_YAW, width=5)
+        self.negative_yaw_movement_button.bind(BUTTON_PRESS,
+                                               lambda event, axis_and_direction=NEGATIVE_YAW:
+                                               self.robot_control_button_callback(
+                                                   axis_and_direction=axis_and_direction))
+        self.negative_yaw_movement_button.bind(BUTTON_RELEASE,
+                                               lambda event, axis_and_direction=NO_MOVEMENT:
+                                               self.robot_control_button_callback(
+                                                   axis_and_direction=axis_and_direction))
+        bb = create_widget_object(self.negative_yaw_movement_button, col_num=LEFT_COLUMN, row_num=bb)
+
+        # Define the positive yaw widget
+        self.positive_yaw_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_YAW, width=5)
+        self.positive_yaw_movement_button.bind(BUTTON_PRESS,
+                                               lambda event, axis_and_direction=POSITIVE_YAW:
+                                               self.robot_control_button_callback(
+                                                   axis_and_direction=axis_and_direction))
+        self.positive_yaw_movement_button.bind(BUTTON_RELEASE,
+                                               lambda event, axis_and_direction=NO_MOVEMENT:
+                                               self.robot_control_button_callback(
+                                                   axis_and_direction=axis_and_direction))
+        bb = create_widget_object(self.positive_yaw_movement_button, col_num=RIGHT_COLUMN, row_num=bb,
                                   increment_row=True)
 
         # endregion
@@ -677,7 +687,7 @@ class UserInterface(BasicNode):
         # Define the registered data load button
         self.registered_data_load_location_button = \
             ttk.Button(thyroid_exam_frame,
-                       text='Select Data to Generate Volume',
+                       text='Select Exam Data from which to Generate Volume',
                        command=self.registered_data_load_location_button_callback)
         dd = create_widget_object(self.registered_data_load_location_button,
                                   col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
@@ -695,20 +705,9 @@ class UserInterface(BasicNode):
                                   col_num=L_MIDDLE_COLUMN, col_span=FULL_WIDTH - TWO_COLUMN,
                                   row_num=dd, increment_row=True)
 
-        # Define generate volume button
-        dd = create_widget_object(ttk.Button(thyroid_exam_frame, text='Generate Volume',
-                                             command=self.generate_volume_button_callback), col_num=LEFT_COLUMN,
-                                  col_span=FULL_WIDTH, row_num=dd, increment_row=True)
-
-        # Create a horizontal separator
-        dd = create_horizontal_separator(thyroid_exam_frame, dd)
-
-        # Create a horizontal separator
-        dd = create_horizontal_separator(thyroid_exam_frame, dd)
-
         # Define the volume data save location button
         self.volume_data_save_location_button = ttk.Button(thyroid_exam_frame,
-                                                           text='Select Location to Save Volume Data',
+                                                           text='Select Location to Save Generated Volume Data',
                                                            command=self.volume_data_save_location_button_callback)
         dd = create_widget_object(self.volume_data_save_location_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
                                   row_num=dd, increment_row=True)
@@ -724,6 +723,60 @@ class UserInterface(BasicNode):
         dd = create_widget_object(ttk.Label(thyroid_exam_frame, textvariable=self.volume_data_save_location_str_var),
                                   col_num=L_MIDDLE_COLUMN, col_span=FULL_WIDTH - TWO_COLUMN,
                                   row_num=dd, increment_row=True)
+
+        # Define generate volume button
+        dd = create_widget_object(ttk.Button(thyroid_exam_frame, text='Generate New Volume',
+                                             command=self.generate_volume_button_callback), col_num=LEFT_COLUMN,
+                                  col_span=FULL_WIDTH, row_num=dd, increment_row=True)
+
+        # Create a horizontal separator
+        dd = create_horizontal_separator(thyroid_exam_frame, dd)
+
+        # Create a horizontal separator
+        dd = create_horizontal_separator(thyroid_exam_frame, dd)
+
+        # Define the volume data loading button
+        self.volume_data_load_location_button = ttk.Button(thyroid_exam_frame,
+                                                           text='Select Volume Data to Load',
+                                                           command=self.volume_data_load_location_button_callback)
+        dd = create_widget_object(self.volume_data_load_location_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                  row_num=dd, increment_row=True)
+
+        # Define the selected location label
+        dd = create_widget_object(ttk.Label(thyroid_exam_frame, text="Selected Location:"), col_num=LEFT_COLUMN,
+                                  col_span=TWO_COLUMN, row_num=dd)
+
+        # Define volume data load location label
+        self.volume_data_load_location_str_var = StringVar(thyroid_exam_frame,
+                                                           "/home/ben/thyroid_ultrasound_data"
+                                                           "/testing_and_validation/volume_data")
+        dd = create_widget_object(ttk.Label(thyroid_exam_frame, textvariable=self.volume_data_load_location_str_var),
+                                  col_num=L_MIDDLE_COLUMN, col_span=FULL_WIDTH - TWO_COLUMN,
+                                  row_num=dd, increment_row=True)
+
+        # Define display volume button
+        self.display_loaded_volume_button = ttk.Button(thyroid_exam_frame, text='Display Loaded Volume',
+                                                       command=self.display_loaded_volume_button_callback,
+                                                       state=DISABLED)
+        dd = create_widget_object(self.display_loaded_volume_button, col_num=LEFT_COLUMN,
+                                  col_span=FULL_WIDTH, row_num=dd, increment_row=True)
+
+        dd = create_horizontal_separator(thyroid_exam_frame, dd)
+        dd = create_horizontal_separator(thyroid_exam_frame, dd)
+
+        # Create calculated volume label
+        dd = create_widget_object(ttk.Label(thyroid_exam_frame, text='Calculated Volume:'),
+                                  col_num=LEFT_COLUMN, row_num=dd)
+
+        # Create label for displaying the volume
+        self.volume_data_result_str_var = StringVar()
+        self.volume_data_result_str_var.set('0.00')
+        dd = create_widget_object(ttk.Label(thyroid_exam_frame, textvariable=self.volume_data_result_str_var),
+                                  col_num=LL_MIDDLE_COLUMN, row_num=dd)
+
+        # Create the unit label
+        dd = create_widget_object(ttk.Label(thyroid_exam_frame, text='ml'),
+                                  col_num=L_MIDDLE_COLUMN, row_num=dd)
 
         # endregion
 
@@ -748,6 +801,15 @@ class UserInterface(BasicNode):
 
         # Define the row counter
         ff = 0
+
+        # Define publish controller statuses button
+        self.publish_controller_statuses_button = \
+            ttk.Button(developer_frame,
+                       text=START_PUBLISHING_CONTROLLER_STATUS_VALUES,
+                       command=self.publish_controller_statuses_button_callback)
+        ff = create_widget_object(self.publish_controller_statuses_button,
+                                  col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                  row_num=ff, increment_row=True)
 
         # Define the controller selector label
         ff = create_widget_object(ttk.Label(developer_frame, text="Select\nController"),
@@ -887,49 +949,96 @@ class UserInterface(BasicNode):
         # Define the row counter
         gg = 0
 
-        # Define the patient contact label
-        gg = create_widget_object(ttk.Label(experimentation_frame, text="Select the value to send to override\n"
-                                                                        "the calculated patient contact value",
-                                            anchor=CENTER, justify=CENTER),
-                                  col_num=LEFT_COLUMN, col_span=FOUR_COLUMN,
-                                  row_num=gg, row_span=DOUBLE_ROW)
-
-        # Define patient contact variable
-        self.select_patient_contact_override_variable = IntVar()
-        self.is_patient_contact_override_active = False
-
-        # Define in contact option
-        self.in_contact_radio_button = ttk.Radiobutton(experimentation_frame, text="In-contact", value=YES_BUTTON,
-                                                       variable=self.select_patient_contact_override_variable)
-        gg = create_widget_object(self.in_contact_radio_button, col_num=MIDDLE_COLUMN, col_span=TWO_COLUMN,
-                                  row_num=gg, sticky='')
-
-        # Define the send signal button
-        self.send_patient_contact_override_button = \
+        # Define the image data stream location button
+        self.image_data_stream_location_button = \
             ttk.Button(experimentation_frame,
-                       text=START_SENDING_OVERRIDE_VALUE,
-                       command=self.send_patient_contact_override_button_callback)
-        gg = create_widget_object(self.send_patient_contact_override_button, col_num=R_MIDDLE_COLUMN,
-                                  col_span=TWO_COLUMN, row_num=gg, row_span=DOUBLE_ROW, increment_row=True)
+                       text='Select the Saved Data to Stream',
+                       command=self.image_data_stream_location_button_callback)
+        gg = create_widget_object(self.image_data_stream_location_button,
+                                  col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                  row_num=gg, increment_row=True)
 
-        # Define not in contact option
-        self.not_in_contact_radio_button = ttk.Radiobutton(experimentation_frame, text="Not In-contact",
-                                                           value=NO_BUTTON,
-                                                           variable=self.select_patient_contact_override_variable)
-        gg = create_widget_object(self.not_in_contact_radio_button, col_num=MIDDLE_COLUMN, col_span=TWO_COLUMN,
-                                  row_num=gg, sticky='', increment_row=True)
+        # Define the selected location label
+        gg = create_widget_object(ttk.Label(experimentation_frame, text='Selected Location:'), col_num=LEFT_COLUMN,
+                                  col_span=TWO_COLUMN, row_num=gg)
 
-        # Define a separator
+        # Define the image data stream location variable
+        self.image_data_stream_location_str_var = StringVar(experimentation_frame, '/home/ben/thyroid_ultrasound_data/'
+                                                                                   'testing_and_validation/raw_images')
+        gg = create_widget_object(ttk.Label(experimentation_frame,
+                                            textvariable=self.image_data_stream_location_str_var),
+                                  col_num=L_MIDDLE_COLUMN, col_span=FULL_WIDTH - TWO_COLUMN,
+                                  row_num=gg, increment_row=True)
+
+        # Define the stream in reverse order button
+        self.reverse_stream_order_button = ttk.Button(experimentation_frame,
+                                                      text=PLAYBACK_STREAM_IN_REVERSE_CHRONOLOGICAL_ORDER,
+                                                      command=self.reverse_stream_order_button_callback,
+                                                      state=DISABLED)
+        gg = create_widget_object(self.reverse_stream_order_button,
+                                  col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                  row_num=gg, increment_row=True)
+
         gg = create_horizontal_separator(experimentation_frame, gg)
 
+        # Define the patient contact label
+        gg = create_widget_object(ttk.Label(experimentation_frame, text="Select the values to override:",
+                                            anchor=CENTER, justify=CENTER),
+                                  col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                  row_num=gg, increment_row=True)
+
+        # Define the send patient contact override button
+        self.send_patient_contact_override_button = \
+            ttk.Button(experimentation_frame,
+                       text=START_SENDING_PATIENT_CONTACT_OVERRIDE_VALUE,
+                       command=self.send_patient_contact_override_button_callback)
+        gg = create_widget_object(self.send_patient_contact_override_button, col_num=LEFT_COLUMN,
+                                  col_span=FULL_WIDTH, row_num=gg, increment_row=True)
+
+        # Define the force control override button
+        self.send_force_control_override_button = \
+            ttk.Button(experimentation_frame,
+                       text=START_SENDING_FORCE_CONTROL_OVERRIDE_VALUE,
+                       command=self.send_force_control_override_button_callback)
+        gg = create_widget_object(self.send_force_control_override_button, col_num=LEFT_COLUMN,
+                                  col_span=FULL_WIDTH, row_num=gg, increment_row=True)
+
+        # Define image balanced override button
+        # self.is_image_balanced_override_active = False
+        self.send_image_balanced_override_button = \
+            ttk.Button(experimentation_frame,
+                       text=START_SENDING_IMAGE_BALANCED_OVERRIDE_VALUE,
+                       command=self.send_image_balanced_override_button_callback)
+        gg = create_widget_object(self.send_image_balanced_override_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                  row_num=gg, increment_row=True)
+
+        # Define image centered override button
+        # self.is_image_centered_override_active = False
+        self.send_image_centered_override_button = \
+            ttk.Button(experimentation_frame,
+                       text=START_SENDING_IMAGE_CENTERED_OVERRIDE_VALUE,
+                       command=self.send_image_centered_override_button_callback)
+        gg = create_widget_object(self.send_image_centered_override_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                  row_num=gg, increment_row=True)
+
         # Define registered data button
-        self.is_registered_data_override_active = False
+        # self.is_registered_data_override_active = False
         self.send_registered_data_override_button = \
             ttk.Button(experimentation_frame,
                        text=START_SENDING_REGISTERED_DATA_OVERRIDE_VALUE,
                        command=self.send_registered_data_override_button_callback)
         gg = create_widget_object(self.send_registered_data_override_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
                                   row_num=gg, increment_row=True)
+
+        # Define not in contact option
+        # self.not_in_contact_radio_button = ttk.Radiobutton(experimentation_frame, text="Not In-contact",
+        #                                                    value=NO_BUTTON,
+        #                                                    variable=self.select_patient_contact_override_variable)
+        # gg = create_widget_object(self.not_in_contact_radio_button, col_num=MIDDLE_COLUMN, col_span=TWO_COLUMN,
+        #                           row_num=gg, sticky='', increment_row=True)
+
+        # Define a separator
+        # gg = create_horizontal_separator(experimentation_frame, gg)
 
         # Define a separator
         gg = create_horizontal_separator(experimentation_frame, gg)
@@ -1023,6 +1132,11 @@ class UserInterface(BasicNode):
                                                       command=self.save_experiment_data_button_callback)
         gg = create_widget_object(self.save_experiment_data_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
                                   row_num=gg, increment_row=True)
+
+        # Define a status label
+        self.all_data_saved_text_variable = StringVar()
+        gg = create_widget_object(ttk.Label(experimentation_frame, textvariable=self.all_data_saved_text_variable),
+                                  col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=gg, increment_row=True)
 
         # Define a separator
         gg = create_horizontal_separator(experimentation_frame, gg)
@@ -1150,13 +1264,13 @@ class UserInterface(BasicNode):
         Publishes the command to generate new image crop coordinates.
         :return: None
         """
-        self.generate_new_image_cropping_command_publisher.publish(Bool(True))
+        self.generate_new_image_cropping_command_service(True)
 
     def load_existing_image_cropping_button_callback(self) -> None:
         """
         Publishes the command to load an existing image cropping.
         """
-        self.load_existing_image_cropping_command_publisher.publish(Bool(True))
+        self.load_existing_image_cropping_command_service(True)
 
     def select_image_crop_callback(self) -> None:
         """
@@ -1183,15 +1297,16 @@ class UserInterface(BasicNode):
         """
         Publish the command to generate the grabcut filter mask
         """
-        self.identify_thyroid_from_points_command_publisher.publish(Bool(True))
+        self.identify_thyroid_from_points_command_service(True)
 
     def scan_positive_button_callback(self) -> None:
         """
         Publish the command to scan upwards.
         """
-        self.scan_command_publisher.publish(
-            Float64(float(self.scan_distance_entry.get()) / 100)  # convert cm to m
-        )
+        # self.scan_command_publisher.publish(
+        #     Float64(float(self.scan_distance_entry.get()) / 100)  # convert cm to m
+        # )
+        self.create_trajectory_service(float(self.scan_distance_entry.get()) / 100)
 
         # Update the pose control button
         self.update_pose_control_button()
@@ -1203,9 +1318,10 @@ class UserInterface(BasicNode):
         """
         Publish the command to scan downwards.
         """
-        self.scan_command_publisher.publish(
-            Float64(-float(self.scan_distance_entry.get()) / 100)  # convert cm to m
-        )
+        # self.scan_command_publisher.publish(
+        #     Float64(-float(self.scan_distance_entry.get()) / 100)  # convert cm to m
+        # )
+        self.create_trajectory_service(-float(self.scan_distance_entry.get()) / 100)
 
         # Update the pose control button
         self.update_pose_control_button()
@@ -1219,8 +1335,8 @@ class UserInterface(BasicNode):
         """
         selected_directory = askdirectory(initialdir=self.registered_data_save_location_str_var.get(),
                                           title="Select the destination for the exam data.")
-        if len(selected_directory) > 3:
-            self.registered_data_save_location_publisher.publish(String(selected_directory))
+        if len(selected_directory) > 3 and isdir(selected_directory):
+            self.registered_data_save_location_service(selected_directory)
             self.registered_data_save_location_str_var.set(selected_directory)
 
     def registered_data_load_location_button_callback(self) -> None:
@@ -1229,8 +1345,8 @@ class UserInterface(BasicNode):
         """
         selected_directory = askdirectory(initialdir=self.registered_data_load_location_str_var.get(),
                                           title="Select the data to load to generate the volume.")
-        if len(selected_directory) > 3:
-            self.registered_data_load_location_publisher.publish(String(selected_directory))
+        if len(selected_directory) > 3 and isdir(selected_directory):
+            self.registered_data_load_location_service(selected_directory)
             self.registered_data_load_location_str_var.set(selected_directory)
 
     def volume_data_save_location_button_callback(self) -> None:
@@ -1239,9 +1355,12 @@ class UserInterface(BasicNode):
         """
         selected_directory = askdirectory(initialdir=self.volume_data_save_location_str_var.get(),
                                           title="Select the destination for the volume data.")
-        if len(selected_directory) > 3:
-            self.volume_data_save_location_publisher.publish(String(selected_directory))
+        if len(selected_directory) > 3 and isdir(selected_directory):
+            self.volume_data_save_location_service(selected_directory)
             self.volume_data_save_location_str_var.set(selected_directory)
+
+    def volume_data_result_callback(self, msg: Float64):
+        self.volume_data_result_str_var.set(str(round(msg.data, 2)))
 
     def update_pose_control_button(self) -> None:
 
@@ -1249,7 +1368,7 @@ class UserInterface(BasicNode):
         self.currently_using_pose_feedback = True
 
         # Publish that pose feedback is now being used
-        self.use_pose_feedback_command_publisher.publish(Bool(self.currently_using_pose_feedback))
+        self.use_pose_feedback_command_service(self.currently_using_pose_feedback)
 
         # Update the pose control button
         self.pose_control_button[WIDGET_TEXT] = STOP_POSE_CONTROL
@@ -1259,37 +1378,46 @@ class UserInterface(BasicNode):
         self.trajectory_following_button[WIDGET_TEXT] = PAUSE_TRAJECTORY
         self.trajectory_following_button[WIDGET_STATE] = NORMAL
 
-    def trajectory_complete_callback(self, msg: Bool) -> None:
+    def trajectory_complete_handler(self, req: BoolRequestRequest):
         """
         Resets the pose control and experiment data saving buttons.
         """
+        if req.value:
+            # Set the state to be that the robot is not currently using force_feedback
+            self.currently_using_pose_feedback = False
 
-        # Set the state to be that the robot is not currently using force_feedback
-        self.currently_using_pose_feedback = False
+            # Publish the command to stop using force feedback
+            self.use_pose_feedback_command_service(self.currently_using_pose_feedback)
 
-        # Publish the command to stop using force feedback
-        self.use_pose_feedback_command_publisher.publish(Bool(self.currently_using_pose_feedback))
+            # Set the state of the button
+            self.pose_control_button[WIDGET_STATE] = DISABLED
 
-        # Set the state of the button
-        self.pose_control_button[WIDGET_STATE] = DISABLED
+            # Set the state of the trajectory button
+            self.trajectory_following_button[WIDGET_STATE] = DISABLED
 
-        # Set the state of the trajectory button
-        self.trajectory_following_button[WIDGET_STATE] = DISABLED
-
-        # Reset the save experiment data buttons
-        self.save_experiment_data_button_callback(action=STOP_SAVING_EXPERIMENT_DATA)
-
-    def complete_full_scan_button_callback(self) -> None:
-        """
-        Publishes the command to complete a full scan.
-        """
-        self.complete_full_scan_command_publisher.publish(Bool(True))
+            # Reset the save experiment data buttons
+            self.save_experiment_data_button_callback(action=STOP_SAVING_EXPERIMENT_DATA)
+        return BoolRequestResponse(True, NO_ERROR)
 
     def generate_volume_button_callback(self) -> None:
         """
         Publish the command to generate a volume from the ultrasound images.
         """
-        self.generate_volume_command_publisher.publish(Bool(True))
+        self.nrts_generate_volume_command_service(True)
+        self.vg_generate_volume_command_service(True)
+        self.volume_data_result_str_var.set('0.00')
+
+    def volume_data_load_location_button_callback(self) -> None:
+        selected_directory = askdirectory(initialdir=self.volume_data_load_location_str_var.get(),
+                                          title="Select the the volume data to load.")
+        if len(selected_directory) > 3 and isdir(selected_directory):
+            self.volume_data_load_location_service(selected_directory)
+            self.volume_data_load_location_str_var.set(selected_directory)
+            self.display_loaded_volume_button[WIDGET_STATE] = NORMAL
+
+    def display_loaded_volume_button_callback(self) -> None:
+        self.display_loaded_volume_command_service(True)
+        self.volume_data_result_str_var.set('0.00')
 
     def image_streaming_button_callback(self):
         """
@@ -1302,25 +1430,31 @@ class UserInterface(BasicNode):
         if button_text == START_IMAGE_STREAMING:
 
             # Publish the command to start filtering images
-            self.image_streaming_command_publisher.publish(Bool(True))
+            self.image_streaming_command_service(True)
 
             # Set it to say "Stop"
             new_button_text = STOP_IMAGE_STREAMING
+
+            # Don't allow the user to reverse the order while streaming
+            self.reverse_stream_order_button[WIDGET_STATE] = DISABLED
 
         # If the button currently says "Stop"
         else:
 
             # Publish the command to stop filtering images
-            self.image_streaming_command_publisher.publish(Bool(False))
+            self.image_streaming_command_service(False)
 
-            # Set the button to say "Stop"
+            # Set the button to say "Start"
             new_button_text = START_IMAGE_STREAMING
+
+            # Allow the user to reverse the order
+            self.reverse_stream_order_button[WIDGET_STATE] = NORMAL
 
         # Set the new text of the button
         self.image_streaming_button[WIDGET_TEXT] = new_button_text
 
     def restart_image_streaming_button_callback(self):
-        self.restart_image_streaming_command_publisher.publish(Bool(True))
+        self.restart_image_streaming_command_service(True)
 
     def image_control_button_callback(self):
         """
@@ -1332,9 +1466,6 @@ class UserInterface(BasicNode):
         # If the button currently says "Start"
         if button_text == START_IMAGE_CONTROL:
 
-            # Publish the command to start using image control
-            self.use_image_feedback_command_publisher.publish(Bool(True))
-
             # Set it to say "Stop"
             new_button_text = STOP_IMAGE_CONTROL
 
@@ -1344,14 +1475,13 @@ class UserInterface(BasicNode):
         # If the button currently says "Stop"
         else:
 
-            # Publish the command to stop filtering images
-            self.use_image_feedback_command_publisher.publish(Bool(False))
-
             # Set the button to say "Stop"
             new_button_text = START_IMAGE_CONTROL
 
             # Set the state to be that image control is not currently being used
             self.currently_using_image_control = False
+
+        self.use_image_feedback_command_service(self.currently_using_image_control)
 
         # Set the new text of the button
         self.image_control_button[WIDGET_TEXT] = new_button_text
@@ -1374,7 +1504,7 @@ class UserInterface(BasicNode):
             self.currently_using_force_feedback = True
 
         # If the button currently says "Stop"
-        else:
+        elif button_text == STOP_FORCE_CONTROL:
 
             # Set it to say "Start"
             new_button_text = START_FORCE_CONTROL
@@ -1382,8 +1512,11 @@ class UserInterface(BasicNode):
             # Set the state to be that the robot is not currently using force_feedback
             self.currently_using_force_feedback = False
 
+        else:
+            raise Exception(button_text + " is not a recognized button text.")
+
         # Publish the command to stop using force feedback
-        self.use_force_feedback_command_publisher.publish(Bool(self.currently_using_force_feedback))
+        self.use_force_feedback_command_service(self.currently_using_force_feedback)
 
         # Set the new text of the button
         self.force_control_button[WIDGET_TEXT] = new_button_text
@@ -1415,7 +1548,7 @@ class UserInterface(BasicNode):
             self.currently_using_balancing_feedback = False
 
         # Publish the command to stop using force feedback
-        self.use_balancing_feedback_command_publisher.publish(Bool(self.currently_using_balancing_feedback))
+        self.use_balancing_feedback_command_service(self.currently_using_balancing_feedback)
 
         # Set the new text of the button
         self.balancing_control_button[WIDGET_TEXT] = new_button_text
@@ -1447,7 +1580,7 @@ class UserInterface(BasicNode):
             self.currently_using_pose_feedback = True
 
         # Publish the command to stop or start using pose feedback
-        self.use_pose_feedback_command_publisher.publish(Bool(self.currently_using_pose_feedback))
+        self.use_pose_feedback_command_service(self.currently_using_pose_feedback)
 
         # Set the new text of the button
         self.trajectory_following_button[WIDGET_TEXT] = new_button_text
@@ -1461,10 +1594,11 @@ class UserInterface(BasicNode):
         self.currently_using_pose_feedback = False
 
         # Publish the command to stop using force feedback
-        self.use_pose_feedback_command_publisher.publish(Bool(self.currently_using_pose_feedback))
+        self.use_pose_feedback_command_service(self.currently_using_pose_feedback)
 
         # Publish the command to clear the trajectory
-        self.clear_trajectory_command_publisher.publish(Bool(True))
+        # self.clear_trajectory_command_publisher.publish(Bool(True))
+        self.clear_trajectory_service(True)
 
         # Set the state of the button
         self.pose_control_button[WIDGET_STATE] = DISABLED
@@ -1475,62 +1609,143 @@ class UserInterface(BasicNode):
         # Reset the save experiment data buttons
         self.save_experiment_data_button_callback(action=STOP_SAVING_EXPERIMENT_DATA)
 
+    def publish_controller_statuses_button_callback(self) -> None:
+        if self.publish_controller_statuses_button[WIDGET_TEXT] == START_PUBLISHING_CONTROLLER_STATUS_VALUES:
+            self.publish_controller_statuses_service(True)
+            self.publish_controller_statuses_button[WIDGET_TEXT] = STOP_PUBLISHING_CONTROLLER_STATUS_VALUES
+        elif self.publish_controller_statuses_button[WIDGET_TEXT] == STOP_PUBLISHING_CONTROLLER_STATUS_VALUES:
+            self.publish_controller_statuses_service(False)
+            self.publish_controller_statuses_button[WIDGET_TEXT] = START_PUBLISHING_CONTROLLER_STATUS_VALUES
+        else:
+            raise Exception("Button text was not recognized")
+
     def pid_controller_selection_callback(self) -> None:
         """
         Publish the pid controller selected on the interface.
         """
-        self.pid_controller_publisher.publish(UInt8(self.pid_selector.get()))
+        resp: ViewControllerGainsResponse = self.view_controller_gains_service(self.pid_selector.get())
+        self.p_gain_var.set(resp.p_gain)
+        self.i_gain_var.set(resp.i_gain)
+        self.d_gain_var.set(resp.d_gain)
 
     def speed_selector_callback(self) -> None:
         """
         Publish the speed selected on the interface.
         """
-        self.speed_selector_publisher.publish(Float64(self.speed_selector.get() / 100))
+        self.speed_selector_service(self.speed_selector.get() / 100)
 
     def pid_value_setting_callback(self) -> None:
         """
         Publish the values selected in the interface
         """
-        self.p_gain_publisher.publish(Float64(float(self.p_gain_entry.get())))
-        self.i_gain_publisher.publish(Float64(float(self.i_gain_entry.get())))
-        self.d_gain_publisher.publish(Float64(float(self.d_gain_entry.get())))
+        try:
+            p_gain = float(self.p_gain_entry.get())
+            i_gain = float(self.i_gain_entry.get())
+            d_gain = float(self.d_gain_entry.get())
+        except ValueError:
+            return
+
+        self.set_controller_gains_service(self.pid_selector.get(), p_gain, i_gain, d_gain)
 
     def send_image_saving_command_callback(self) -> None:
 
         if self.save_images_button.cget(WIDGET_TEXT) == START_SAVING_IMAGES:
-            self.send_image_saving_command_publisher.publish(Bool(True))
+            self.send_image_saving_command_service(True)
             self.save_images_button.configure(text=STOP_SAVING_IMAGES)
         elif self.save_images_button.cget(WIDGET_TEXT) == STOP_SAVING_IMAGES:
-            self.send_image_saving_command_publisher.publish(Bool(False))
+            self.send_image_saving_command_service(False)
             self.save_images_button.configure(text=START_SAVING_IMAGES)
         else:
             raise Exception("Something very strange has happened here.")
 
     def send_save_images_destination(self) -> None:
-        self.send_folder_destination_publisher.publish(askdirectory(initialdir='/home/ben',
-                                                                    title="Select destination for saved images."))
+        self.send_folder_destination_service(askdirectory(initialdir='/home/ben',
+                                                          title="Select destination for saved images."))
 
-    def send_patient_contact_override_button_callback(self) -> None:
-        if self.send_patient_contact_override_button[WIDGET_TEXT] == START_SENDING_OVERRIDE_VALUE:
-            self.is_patient_contact_override_active = True
-            self.in_contact_radio_button[WIDGET_STATE] = DISABLED
-            self.not_in_contact_radio_button[WIDGET_STATE] = DISABLED
-            self.send_patient_contact_override_button[WIDGET_TEXT] = STOP_SENDING_OVERRIDE_VALUE
-        elif self.send_patient_contact_override_button[WIDGET_TEXT] == STOP_SENDING_OVERRIDE_VALUE:
-            self.is_patient_contact_override_active = False
-            self.in_contact_radio_button[WIDGET_STATE] = NORMAL
-            self.not_in_contact_radio_button[WIDGET_STATE] = NORMAL
-            self.send_patient_contact_override_button[WIDGET_TEXT] = START_SENDING_OVERRIDE_VALUE
+    def image_data_stream_location_button_callback(self) -> None:
+        """
+        Select the directory from which to stream images.
+        """
+        selected_directory = askdirectory(initialdir=self.image_data_stream_location_str_var.get(),
+                                          title="Select the destination for the exam data.")
+        if len(selected_directory) > 3 and isdir(selected_directory):
+            self.image_streaming_location_service(selected_directory)
+            self.image_data_stream_location_str_var.set(selected_directory)
+            self.image_streaming_button[WIDGET_STATE] = NORMAL
+            self.restart_image_streaming_button[WIDGET_STATE] = NORMAL
+            self.reverse_stream_order_button[WIDGET_STATE] = NORMAL
+
+    def reverse_stream_order_button_callback(self) -> None:
+        if self.reverse_stream_order_button[WIDGET_TEXT] == PLAYBACK_STREAM_IN_REVERSE_CHRONOLOGICAL_ORDER:
+            self.reverse_stream_order_service(True)
+            self.reverse_stream_order_button[WIDGET_TEXT] = PLAYBACK_STREAM_IN_CHRONOLOGICAL_ORDER
+        elif self.reverse_stream_order_button[WIDGET_TEXT] == PLAYBACK_STREAM_IN_CHRONOLOGICAL_ORDER:
+            self.reverse_stream_order_service(False)
+            self.reverse_stream_order_button[WIDGET_TEXT] = PLAYBACK_STREAM_IN_REVERSE_CHRONOLOGICAL_ORDER
         else:
             raise Exception("Button text was not recognized")
 
+    def send_patient_contact_override_button_callback(self) -> None:
+        if self.send_patient_contact_override_button[WIDGET_TEXT] == START_SENDING_PATIENT_CONTACT_OVERRIDE_VALUE:
+            # self.is_patient_contact_override_active = True
+            self.tm_override_patient_contact_service(True)
+            self.rc_override_patient_contact_service(True)
+            # self.in_contact_radio_button[WIDGET_STATE] = DISABLED
+            # self.not_in_contact_radio_button[WIDGET_STATE] = DISABLED
+            self.send_patient_contact_override_button[WIDGET_TEXT] = STOP_SENDING_PATIENT_CONTACT_OVERRIDE_VALUE
+        elif self.send_patient_contact_override_button[WIDGET_TEXT] == STOP_SENDING_PATIENT_CONTACT_OVERRIDE_VALUE:
+            # self.is_patient_contact_override_active = False
+            self.tm_override_patient_contact_service(False)
+            self.rc_override_patient_contact_service(False)
+            # self.in_contact_radio_button[WIDGET_STATE] = NORMAL
+            # self.not_in_contact_radio_button[WIDGET_STATE] = NORMAL
+            self.send_patient_contact_override_button[WIDGET_TEXT] = START_SENDING_PATIENT_CONTACT_OVERRIDE_VALUE
+        else:
+            raise Exception("Button text was not recognized")
+
+    def send_force_control_override_button_callback(self) -> None:
+        if self.send_force_control_override_button[WIDGET_TEXT] == START_SENDING_FORCE_CONTROL_OVERRIDE_VALUE:
+            self.tm_override_force_control_service(True)
+            self.send_force_control_override_button[WIDGET_TEXT] = STOP_SENDING_FORCE_CONTROL_OVERRIDE_VALUE
+        elif self.send_force_control_override_button[WIDGET_TEXT] == STOP_SENDING_FORCE_CONTROL_OVERRIDE_VALUE:
+            self.tm_override_force_control_service(False)
+            self.send_force_control_override_button[WIDGET_TEXT] = START_SENDING_FORCE_CONTROL_OVERRIDE_VALUE
+        else:
+            raise Exception(self.send_force_control_override_button[WIDGET_TEXT] + " is not a recognized button text.")
+
     def send_registered_data_override_button_callback(self) -> None:
         if self.send_registered_data_override_button[WIDGET_TEXT] == START_SENDING_REGISTERED_DATA_OVERRIDE_VALUE:
-            self.is_registered_data_override_active = True
+            # self.is_registered_data_override_active = True
+            self.tm_override_data_registered_service(True)
             self.send_registered_data_override_button[WIDGET_TEXT] = STOP_SENDING_REGISTERED_DATA_OVERRIDE_VALUE
         elif self.send_registered_data_override_button[WIDGET_TEXT] == STOP_SENDING_REGISTERED_DATA_OVERRIDE_VALUE:
-            self.is_registered_data_override_active = False
+            # self.is_registered_data_override_active = False
+            self.tm_override_data_registered_service(False)
             self.send_registered_data_override_button[WIDGET_TEXT] = START_SENDING_REGISTERED_DATA_OVERRIDE_VALUE
+        else:
+            raise Exception("Button text was not recognized")
+
+    def send_image_centered_override_button_callback(self) -> None:
+        if self.send_image_centered_override_button[WIDGET_TEXT] == START_SENDING_IMAGE_CENTERED_OVERRIDE_VALUE:
+            # self.is_image_centered_override_active = True
+            self.tm_override_image_centered_service(True)
+            self.send_image_centered_override_button[WIDGET_TEXT] = STOP_SENDING_IMAGE_CENTERED_OVERRIDE_VALUE
+        elif self.send_image_centered_override_button[WIDGET_TEXT] == STOP_SENDING_IMAGE_CENTERED_OVERRIDE_VALUE:
+            # self.is_image_centered_override_active = False
+            self.tm_override_image_centered_service(False)
+            self.send_image_centered_override_button[WIDGET_TEXT] = START_SENDING_IMAGE_CENTERED_OVERRIDE_VALUE
+        else:
+            raise Exception("Button text was not recognized")
+
+    def send_image_balanced_override_button_callback(self) -> None:
+        if self.send_image_balanced_override_button[WIDGET_TEXT] == START_SENDING_IMAGE_BALANCED_OVERRIDE_VALUE:
+            # self.is_image_balanced_override_active = True
+            self.tm_override_image_balanced_service(True)
+            self.send_image_balanced_override_button[WIDGET_TEXT] = STOP_SENDING_IMAGE_BALANCED_OVERRIDE_VALUE
+        elif self.send_image_balanced_override_button[WIDGET_TEXT] == STOP_SENDING_IMAGE_BALANCED_OVERRIDE_VALUE:
+            # self.is_image_balanced_override_active = False
+            self.tm_override_image_balanced_service(False)
+            self.send_image_balanced_override_button[WIDGET_TEXT] = START_SENDING_IMAGE_BALANCED_OVERRIDE_VALUE
         else:
             raise Exception("Button text was not recognized")
 
@@ -1566,6 +1781,8 @@ class UserInterface(BasicNode):
             self.save_image_centroid_no_button[WIDGET_STATE] = DISABLED
             self.save_skin_error_yes_button[WIDGET_STATE] = DISABLED
             self.save_skin_error_no_button[WIDGET_STATE] = DISABLED
+
+            self.all_data_saved_text_variable.set("")
 
         elif (action == TOGGLE_SAVING_EXPERIMENT_DATA and
               self.save_experiment_data_button[WIDGET_TEXT] == STOP_SAVING_EXPERIMENT_DATA) or \
@@ -1614,35 +1831,34 @@ class UserInterface(BasicNode):
         data
             The WrenchStamped message sent by the robot containing the current force experienced by the robot.
         """
-        self.current_force_string_var.set(str(round(data.wrench.force.z, 1)))
+        try:
+            self.current_force_string_var.set(str(round(data.wrench.force.z, 1)))
+        except AttributeError:
+            pass
 
     def debug_status_messages_callback(self, data: log_message):
         self.update_status(data)
 
-    def p_gain_message_callback(self, data: Float64) -> None:
-        """
-        Set the value of the p gain sent to the node.
-        """
-        self.p_gain_var.set(str(data.data))
+    def all_data_saved_callback(self, msg: Bool):
+        try:
+            self.all_data_saved_text_variable.set("All data has been saved.")
+        except AttributeError:
+            pass
 
-    def i_gain_message_callback(self, data: Float64) -> None:
-        """
-        Set the value of the i gain sent to the node.
-        """
-        self.i_gain_var.set(str(data.data))
+    def remaining_data_callback(self, msg: String):
 
-    def d_gain_message_callback(self, data: Float64) -> None:
-        """
-        Set the value of the d gain sent to the node.
-        """
-        self.d_gain_var.set(str(data.data))
+        if self.all_data_saved_text_variable.get() != "All data has been saved.":
+            self.all_data_saved_text_variable.set(msg.data)
 
     def shutdown_node(self):
         """
         Define the custom shutdown behavior of the node to close the window.
         """
         print("\nShutdown signal received.")
-        self.parent.destroy()
+        try:
+            self.parent.destroy()
+        except TclError:
+            pass
 
     # endregion
     #############################################################################
@@ -1676,24 +1892,15 @@ class UserInterface(BasicNode):
         """
         Publishes messages a single time on startup.
         """
-        self.registered_data_save_location_publisher.publish(String(self.registered_data_save_location_str_var.get()))
-        self.registered_data_load_location_publisher.publish(String(self.registered_data_load_location_str_var.get()))
-        self.volume_data_save_location_publisher.publish(String(self.volume_data_save_location_str_var.get()))
-        self.speed_selector_publisher.publish(Float64(1.0))
+        self.registered_data_save_location_service(self.registered_data_save_location_str_var.get())
+        self.registered_data_load_location_service(self.registered_data_load_location_str_var.get())
+        self.volume_data_save_location_service(self.volume_data_save_location_str_var.get())
 
     def publishing_loop(self):
         """
         Publishes the different commands at regular intervals.
         """
-        self.use_image_feedback_command_publisher.publish(Bool(self.currently_using_image_control))
-        self.use_force_feedback_command_publisher.publish(Bool(self.currently_using_force_feedback))
-        self.use_pose_feedback_command_publisher.publish(Bool(self.currently_using_pose_feedback))
-        self.use_balancing_feedback_command_publisher.publish(Bool(self.currently_using_balancing_feedback))
         self.image_centering_side_publisher.publish(Int8(self.image_centering_side_variable.get()))
-        if self.is_patient_contact_override_active:
-            self.patient_contact_publisher.publish(Bool(bool(self.select_patient_contact_override_variable.get())))
-        if self.is_registered_data_override_active:
-            self.registered_data_publisher.publish(RegisteredDataMsg())
         new_msg = TwistStamped()
         new_msg.header.stamp = Time.now()
         if self.manual_control_velocity_message is not None:

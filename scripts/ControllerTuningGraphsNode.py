@@ -4,6 +4,8 @@
 File containing ControllerTuningGraphsNode class.
 """
 
+# TODO - High - Add a subscriber to listen for the current image setpoint
+
 # Import standard ROS packages
 from geometry_msgs.msg import WrenchStamped, TwistStamped
 from armer_msgs.msg import ManipulatorState
@@ -102,9 +104,9 @@ class ControllerTuningGraphsNode(BasicNode):
                                                    title="Position - X Linear", y_label="Position Error (m)",
                                                    x_label="Time (s)")
 
-        self.img_y_lin_monitor = ControllerMonitor(ax[0][1], y_axis_limits=(-0.025, 0.025),
-                                                   y_axis_limit_multiples=(0.005, 0.005),
-                                                   title="Image - Y Linear", y_label="Position Error (m)",
+        self.img_y_lin_monitor = ControllerMonitor(ax[0][1], y_axis_limits=(-50, 50),
+                                                   y_axis_limit_multiples=(15, 15),
+                                                   title="Image - Y Linear", y_label="Position Error (px)",
                                                    x_label="Time (s)")
 
         self.force_z_lin_monitor = ControllerMonitor(ax[1][0], y_axis_limits=(-0.5, 10),
@@ -250,7 +252,10 @@ class ControllerTuningGraphsNode(BasicNode):
         Define the custom shutdown behavior of the node to close the window.
         """
         print("Shutdown signal received.")
-        plt.close(self.fig)
+        try:
+            plt.close(self.fig)
+        except:
+            pass
 
 
 class ControllerMonitor:

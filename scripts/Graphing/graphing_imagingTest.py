@@ -1,10 +1,14 @@
 # Import standard python packages
+from math import atan2
+
 from matplotlib.pyplot import show, subplots, rc
+from numpy import rad2deg
 from numpy.polynomial import Polynomial
 from statistics import median, stdev, mean
 
 # Import custom python packages
-from ExperimentalDataRecorder import MESSAGE_ID, STAMP_SECS, STAMP_NSECS, FORCE, POSE_Z
+from ExperimentalDataRecorder import MESSAGE_ID, STAMP_SECS, STAMP_NSECS, FORCE, POSE_Z, POSE_ROLL, SKIN_ERROR, \
+    IMAGE_CENTROID
 from Graphing.read_recorded_data_csv import read_recorded_data_csv, COMBINED_STAMP, CONTROLLED, UNCONTROLLED
 
 # Set the default size for plot elements
@@ -18,21 +22,16 @@ rc('figure', titlesize=24)  # font size of the figure title
 rc('figure', dpi=300)  # Set the DPI of the figure
 
 # Select which graphs to produce
-create_force_graph = True
-create_pose_graph = True
+create_centroid_graph = True
+create_pose_graph = False
 
 # Define the sources of the information and choose the colors
-BASIC_SOURCE_PATH: str = '/home/ben/thyroid_ultrasound_data/experimentation/ForceControl/'
-time_stamps = ['2024-02-19_13-05-58-231870', '2024-02-19_13-07-40-867184', '2024-02-19_13-08-56-948372',
-               '2024-02-19_13-10-24-970993', '2024-02-19_13-11-58-761400', '2024-02-19_13-13-17-885949']
+BASIC_SOURCE_PATH: str = '/home/ben/thyroid_ultrasound_data/experimentation/ImageControl/'
+time_stamps = ['2024-03-10_14-15-50-095346', '2024-03-10_14-21-52-993521', '2024-03-10_14-31-34-704117',
+               '2024-03-10_12-47-29-098133', '2024-03-10_14-08-58-467311', '2024-03-10_14-12-28-780537']
 data_types = [UNCONTROLLED, UNCONTROLLED, UNCONTROLLED, CONTROLLED, CONTROLLED, CONTROLLED]
 line_colors = [(171, 22, 43), (109, 109, 109), (0, 46, 109), (94, 115, 97), (199, 138, 61), (124, 101, 105)]
 data_color_adjustment_value = 50  # pts
-# BASIC_SOURCE_PATH: str = '/home/ben/thyroid_ultrasound_data/experimentation/ForceControl/'
-# time_stamps = ['2024-03-07_23-47-34-898445']
-# data_types = [CONTROLLED]
-# data_colors = ['lightskyblue']
-# line_colors = ['deepskyblue']
 
 # Define the list of data_colors
 data_colors = []
@@ -42,7 +41,8 @@ for ii in range(len(line_colors)):
     line_colors[ii] = tuple([value / 255 for value in line_colors[ii]])
     data_colors.append(tuple([value + (data_color_adjustment_value / 255) for value in line_colors[ii]]))
 
-if create_force_graph:
+if create_centroid_graph:
+
     # Make sure all data is the right size
     if len(time_stamps) != len(data_colors) != len(line_colors) != len(data_types):
         raise Exception("Data sources and number of colors do not match for the uncontrolled data.")
@@ -65,28 +65,28 @@ if create_force_graph:
 
         # Build the path according to the data type
         if data_type == CONTROLLED:
-            source_path = (BASIC_SOURCE_PATH + 'Controlled/' + time_stamp + '_experiment/Force_' + time_stamp + '.csv')
+            source_path = (BASIC_SOURCE_PATH + 'Controlled/' + time_stamp + '_experiment/Centroid_' + time_stamp + '.csv')
         elif data_type == UNCONTROLLED:
-            source_path = (BASIC_SOURCE_PATH + 'Uncontrolled/' + time_stamp + '_experiment/Force_' + time_stamp + '.csv')
+            source_path = (BASIC_SOURCE_PATH + 'Uncontrolled/' + time_stamp + '_experiment/Centroid_' + time_stamp + '.csv')
         else:
             raise Exception(str(data_type) + ' is not a recognized data type.')
 
         # Read the data from the file
         data = read_recorded_data_csv(file_path=source_path,
-                                      headings=[MESSAGE_ID, STAMP_SECS, STAMP_NSECS, FORCE],
+                                      headings=[MESSAGE_ID, STAMP_SECS, STAMP_NSECS, IMAGE_CENTROID],
                                       sort_heading=MESSAGE_ID,
                                       additional_headings_to_zero=[STAMP_SECS])
 
         # Define the sampling rate for the points included in the plot
-        point_sampling_rate = 20
+        point_sampling_rate = 1
 
         # Define variables for convenience
         data_x = data[COMBINED_STAMP][::point_sampling_rate]
-        data_y = data[FORCE][::point_sampling_rate]
+        data_y = data[IMAGE_CENTROID][::point_sampling_rate]
         data_y_std_dev = stdev(data_y)
 
         # Calculate the line of best fit for the data
-        line_estimation = Polynomial.fit(data_x, data_y, deg=8)
+        line_estimation = Polynomial.fit(data_x, data_y, deg=12)
         estimated_data_y = [line_estimation(x) for x in data_x]
 
         shade_data_y_std_dev = stdev([y_real - y_estimate for y_real, y_estimate in zip(data_y, estimated_data_y)])
@@ -100,11 +100,11 @@ if create_force_graph:
 
         # Update the uncontrolled data change
         if data_type == UNCONTROLLED:
-            uncontrolled_data_change = uncontrolled_data_change + [data[FORCE][-1] - data[FORCE][0]]
+            uncontrolled_data_change = uncontrolled_data_change + [data[IMAGE_CENTROID][-1] - data[IMAGE_CENTROID][0]]
 
         # Update the complete controlled data list
         if data_type == CONTROLLED:
-            completed_controlled_data = completed_controlled_data + data[FORCE]
+            completed_controlled_data = completed_controlled_data + data[IMAGE_CENTROID]
 
         # Increment the trial number
         trial_number = trial_number + 1
@@ -121,7 +121,7 @@ if create_force_graph:
     # Set the parameters for the figure
     axes.grid(axis='y')
     axes.set_xlabel(COMBINED_STAMP)
-    axes.set_ylabel(FORCE)
+    axes.set_ylabel("Centroid Error (px)")
 
     # Add the legend
     axes.legend()
@@ -159,7 +159,7 @@ if create_pose_graph:
 
         # Read the data from the file
         data = read_recorded_data_csv(file_path=source_path,
-                                      headings=[MESSAGE_ID, STAMP_SECS, STAMP_NSECS, POSE_Z],
+                                      headings=[MESSAGE_ID, STAMP_SECS, STAMP_NSECS, POSE_ROLL],
                                       sort_heading=MESSAGE_ID,
                                       additional_headings_to_zero=[STAMP_SECS])
 
@@ -168,7 +168,7 @@ if create_pose_graph:
 
         # Define variables for convenience
         data_x = data[COMBINED_STAMP][::point_sampling_rate]
-        data_y = data[POSE_Z][::point_sampling_rate]
+        data_y = data[POSE_ROLL][::point_sampling_rate]
         data_y_std_dev = stdev(data_y)
 
         # Calculate the line of best fit for the data
@@ -190,7 +190,7 @@ if create_pose_graph:
     # Set the parameters for the figure
     axes.grid(axis='y')
     axes.set_xlabel(COMBINED_STAMP)
-    axes.set_ylabel('Probe Position in Z Axis\nw.r.t. Robot Origin (m)')
+    axes.set_ylabel(POSE_ROLL)
 
     # Add the legend
     axes.legend()

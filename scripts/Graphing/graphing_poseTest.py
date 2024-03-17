@@ -2,10 +2,11 @@
 from csv import DictReader
 from matplotlib.pyplot import show, subplots, rc, figure
 from numpy import array
+from statistics import median, stdev, mean
 
 # Import custom python packages
 from ExperimentalDataRecorder import MESSAGE_ID, STAMP_SECS, STAMP_NSECS, POSE_X, POSE_Y, POSE_Z, \
-    POSE_ROLL, POSE_PITCH, POSE_YAW
+    POSE_ROLL, POSE_PITCH, POSE_YAW, WAYPOINT_REACHED
 from thyroid_ultrasound_robot_control_support.Helpers.calc_inverse import calc_inverse
 from thyroid_ultrasound_robot_control_support.Helpers.calc_straight_line_distance import calc_straight_line_distance
 from thyroid_ultrasound_robot_control_support.Helpers.calc_transformation_from_rpy import calc_transformation_from_rpy
@@ -31,13 +32,13 @@ COMBINED_STAMP: str = 'Elapsed Time (s)'
 time_stamps = ['2024-02-19_13-29-32-391129']
 line_colors = []
 
-time_stamp = '2024-02-19_13-29-32-391129'
+time_stamp = '2024-03-09_18-36-25-368610'
 POSE_FILE_PATH: str = '/home/ben/thyroid_ultrasound_data/experimentation/PoseControl' \
                       '/' + time_stamp + '_experiment/Pose_' + time_stamp + '.csv'
 
 # Create a figure and axes to plot the results
 fig = figure()
-axes_grid_space = fig.add_gridspec(2, 6, wspace=1.)
+axes_grid_space = fig.add_gridspec(3, 2, wspace=1.)
 
 # Define a counter to determine which plot to plot on
 axis_counter = 0
@@ -47,10 +48,12 @@ axis_counter = 0
 
 # Define a temporary dictionary to store each result
 temp_results_dict = {MESSAGE_ID: [], COMBINED_STAMP: [], POSE_X: [], POSE_Y: [], POSE_Z: [],
-                     POSE_ROLL: [], POSE_PITCH: [], POSE_YAW: []}
+                     POSE_ROLL: [], POSE_PITCH: [], POSE_YAW: [], WAYPOINT_REACHED: []}
 # Define final dictionary to store each result
 final_results_dict = {MESSAGE_ID: [], COMBINED_STAMP: [], POSE_X: [], POSE_Y: [], POSE_Z: [],
+                      POSE_ROLL: [], POSE_PITCH: [], POSE_YAW: [],
                       STRAIGHT_LINE_DISTANCE: [], PROBE_X_DISTANCE: [], PROBE_Y_DISTANCE: [], PROBE_Z_DISTANCE: []}
+waypoints = {COMBINED_STAMP: [], POSE_X: []}
 # Open the file
 source_file = open(POSE_FILE_PATH, mode='r')
 source_file_reader = DictReader(source_file)
@@ -76,6 +79,7 @@ for row in source_file_reader:
     temp_results_dict[POSE_ROLL].append(float(row[POSE_ROLL]))
     temp_results_dict[POSE_PITCH].append(float(row[POSE_PITCH]))
     temp_results_dict[POSE_YAW].append(float(row[POSE_YAW]))
+    temp_results_dict[WAYPOINT_REACHED].append(bool(int(row[WAYPOINT_REACHED])))
 
 # Find the smallest values from the data
 min_stamp = min(temp_results_dict[COMBINED_STAMP])
@@ -84,7 +88,7 @@ min_stamp = min(temp_results_dict[COMBINED_STAMP])
 inverse_starting_pose = calc_inverse(starting_pose)
 
 # Improve the data for graphing
-for message_id, seconds_stamp, pose_x, pose_y, pose_z, pose_roll, pose_pitch, pose_yaw in zip(
+for message_id, seconds_stamp, pose_x, pose_y, pose_z, pose_roll, pose_pitch, pose_yaw, waypoint_reached in zip(
         temp_results_dict[MESSAGE_ID],
         temp_results_dict[COMBINED_STAMP],
         temp_results_dict[POSE_X],
@@ -92,13 +96,17 @@ for message_id, seconds_stamp, pose_x, pose_y, pose_z, pose_roll, pose_pitch, po
         temp_results_dict[POSE_Z],
         temp_results_dict[POSE_ROLL],
         temp_results_dict[POSE_PITCH],
-        temp_results_dict[POSE_YAW], ):
+        temp_results_dict[POSE_YAW],
+        temp_results_dict[WAYPOINT_REACHED]):
     # Pull the data from the previous array
     final_results_dict[MESSAGE_ID].append(message_id)
     final_results_dict[COMBINED_STAMP].append(seconds_stamp - min_stamp)
     final_results_dict[POSE_X].append(pose_x)
     final_results_dict[POSE_Y].append(pose_y)
     final_results_dict[POSE_Z].append(pose_z)
+    final_results_dict[POSE_ROLL].append(pose_roll)
+    final_results_dict[POSE_PITCH].append(pose_pitch)
+    final_results_dict[POSE_YAW].append(pose_yaw)
     final_results_dict[STRAIGHT_LINE_DISTANCE].append(calc_straight_line_distance((starting_pose[0][3],
                                                                               starting_pose[1][3],
                                                                               starting_pose[2][3]),
@@ -106,18 +114,34 @@ for message_id, seconds_stamp, pose_x, pose_y, pose_z, pose_roll, pose_pitch, po
 
     # Convert the current pose to a transformation matrix
     current_pose = calc_transformation_from_rpy(xyz=(pose_x, pose_y, pose_z),
-                                                rpy=(pose_roll, pose_pitch, pose_yaw))
+                                                rpy=(-pose_roll, pose_pitch, pose_yaw))
 
     # Calculate the current pose in terms of the starting pose
-    position = inverse_starting_pose @ current_pose
+    position = inverse_starting_pose @ array([[current_pose[0, 3]],
+                                              [current_pose[1, 3]],
+                                              [current_pose[2, 3]],
+                                              [1]])
 
     # Pull out the distance in X from the starting pose
-    final_results_dict[PROBE_X_DISTANCE].append(position[0][3])
-    final_results_dict[PROBE_Y_DISTANCE].append(position[1][3])
-    final_results_dict[PROBE_Z_DISTANCE].append(position[2][3])
+    final_results_dict[PROBE_X_DISTANCE].append(abs(position[0][0]))
+    final_results_dict[PROBE_Y_DISTANCE].append(abs(position[1][0]))
+    final_results_dict[PROBE_Z_DISTANCE].append(abs(position[2][0]))
+
+    if waypoint_reached:
+        waypoints[COMBINED_STAMP].append(seconds_stamp - min_stamp)
+        waypoints[POSE_X].append(abs(position[0][0]))
+
+distance_between_waypoints = [waypoints[POSE_X][ii] - waypoints[POSE_X][ii - 1] for ii in range(2, len(waypoints[POSE_X]))]
+clean_distance_between_waypoints = []
+for distance in distance_between_waypoints:
+    if abs(distance) > 10 ** -4:
+        clean_distance_between_waypoints.append(distance)
+print(mean(clean_distance_between_waypoints))
+print(median(clean_distance_between_waypoints))
+print(stdev(clean_distance_between_waypoints))
 
 # Define the sampling rate for the points included in the plot
-point_sampling_rate = 60
+point_sampling_rate = 2
 
 # Define variables for convenience
 common_x = final_results_dict[COMBINED_STAMP][::point_sampling_rate]
@@ -155,10 +179,11 @@ ax_4.scatter(common_x, final_results_dict[PROBE_Y_DISTANCE][::point_sampling_rat
              s=0.5, c='green', label='Y Axis')
 ax_4.scatter(common_x, final_results_dict[PROBE_Z_DISTANCE][::point_sampling_rate],
              s=0.5, c='blue', label='Z Axis')
+ax_4.legend()
+ax_4.scatter(waypoints[COMBINED_STAMP], waypoints[POSE_X], s=6, c='black', marker="D")
 ax_4.set_xlabel(COMBINED_STAMP)
 ax_4.set_ylabel("Distance Travelled w.r.t. Initial Pose (m)")
 ax_4.grid(axis='y')
-ax_4.legend()
 
 
 # axes[0][0].scatter(common_x, final_results_dict[POSE_X][::point_sampling_rate], s=0.5, c='r')

@@ -51,6 +51,12 @@ IMAGE_CENTROID: str = 'Centroid Error in X (m)'
 SKIN_ERROR: str = 'Skin Error Slope'
 WAYPOINT_REACHED: str = 'Waypoint Reached'
 
+# Define prefixes for CSV files
+FORCE_PREFIX: str = 'Force_'
+POSE_PREFIX: str = 'Pose_'
+CENTROID_PREFIX: str = 'Centroid_'
+SKIN_ERROR_PREFIX: str = 'SkinError_'
+
 
 class ExperimentDataRecorder(BasicNode):
 
@@ -198,7 +204,7 @@ class ExperimentDataRecorder(BasicNode):
                 self.pose_message_id = 0
 
                 # Create a file to save the data in
-                self.pose_file = open(self.current_folder_path + "Pose_" + date_stamp + ".csv", mode='w')
+                self.pose_file = open(self.current_folder_path + POSE_PREFIX + date_stamp + ".csv", mode='w')
                 self.pose_file_writer = DictWriter(self.pose_file, delimiter=',',
                                                    fieldnames=[MESSAGE_ID, STAMP_SECS, STAMP_NSECS,
                                                                POSE_X, POSE_Y, POSE_Z,
@@ -212,7 +218,7 @@ class ExperimentDataRecorder(BasicNode):
             # If saving the force data
             if data.save_force:
                 # Create a file to save the data in
-                self.force_file = open(self.current_folder_path + 'Force_' + date_stamp + '.csv', mode='w')
+                self.force_file = open(self.current_folder_path + FORCE_PREFIX + date_stamp + '.csv', mode='w')
                 self.force_file_writer = DictWriter(self.force_file, delimiter=',',
                                                     fieldnames=[MESSAGE_ID, STAMP_SECS, STAMP_NSECS, FORCE])
                 self.force_file_writer.writeheader()
@@ -240,7 +246,7 @@ class ExperimentDataRecorder(BasicNode):
 
             if data.save_image_centroid:
                 # Create a file to save the data in
-                self.image_centroid_file = open(self.current_folder_path + 'Centroid_' + date_stamp + '.csv', mode='w')
+                self.image_centroid_file = open(self.current_folder_path + CENTROID_PREFIX + date_stamp + '.csv', mode='w')
                 self.image_centroid_file_writer = DictWriter(self.image_centroid_file, delimiter=',',
                                                              fieldnames=[MESSAGE_ID, STAMP_SECS, STAMP_NSECS,
                                                                          IMAGE_CENTROID])
@@ -251,7 +257,7 @@ class ExperimentDataRecorder(BasicNode):
 
             if data.save_skin_error:
                 # Create a file to save the data in
-                self.skin_error_file = open(self.current_folder_path + 'SkinError_' + date_stamp + '.csv', mode='w')
+                self.skin_error_file = open(self.current_folder_path + SKIN_ERROR_PREFIX + date_stamp + '.csv', mode='w')
                 self.skin_error_file_writer = DictWriter(self.skin_error_file, delimiter=',',
                                                          fieldnames=[MESSAGE_ID, STAMP_SECS, STAMP_NSECS,
                                                                      SKIN_ERROR])

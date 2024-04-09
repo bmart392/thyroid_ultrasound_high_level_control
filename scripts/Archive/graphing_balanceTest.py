@@ -7,9 +7,9 @@ from numpy.polynomial import Polynomial
 from statistics import median, stdev, mean
 
 # Import custom python packages
-from ExperimentalDataRecorder import MESSAGE_ID, STAMP_SECS, STAMP_NSECS, FORCE, POSE_Z, POSE_ROLL, SKIN_ERROR, \
-    IMAGE_CENTROID
-from Graphing.read_recorded_data_csv import read_recorded_data_csv, COMBINED_STAMP, CONTROLLED, UNCONTROLLED
+from ExperimentalDataRecorder import MESSAGE_ID, STAMP_SECS, STAMP_NSECS, FORCE, POSE_Z, POSE_ROLL, SKIN_ERROR
+from Graphing.read_recorded_data_csv import read_recorded_data_csv, COMBINED_STAMP, CONTROLLED, UNCONTROLLED,\
+    FIG_WIDTH, FIG_HEIGHT
 
 # Set the default size for plot elements
 rc('font', size=10)  # controls default text sizes
@@ -22,13 +22,13 @@ rc('figure', titlesize=24)  # font size of the figure title
 rc('figure', dpi=300)  # Set the DPI of the figure
 
 # Select which graphs to produce
-create_centroid_graph = True
-create_pose_graph = False
+create_force_graph = True
+create_pose_graph = True
 
 # Define the sources of the information and choose the colors
-BASIC_SOURCE_PATH: str = '/home/ben/thyroid_ultrasound_data/experimentation/ImageControl/'
-time_stamps = ['2024-03-10_14-15-50-095346', '2024-03-10_14-21-52-993521', '2024-03-10_14-31-34-704117',
-               '2024-03-10_12-47-29-098133', '2024-03-10_14-08-58-467311', '2024-03-10_14-12-28-780537']
+BASIC_SOURCE_PATH: str = '/home/ben/thyroid_ultrasound_data/experimentation/BalanceControl/'
+time_stamps = ['2024-03-10_10-41-54-154715', '2024-03-10_10-44-54-134848', '2024-03-10_10-47-30-414361',
+               '2024-03-10_10-51-05-732145', '2024-03-10_10-54-15-624089', '2024-03-10_12-04-31-643835']
 data_types = [UNCONTROLLED, UNCONTROLLED, UNCONTROLLED, CONTROLLED, CONTROLLED, CONTROLLED]
 line_colors = [(171, 22, 43), (109, 109, 109), (0, 46, 109), (94, 115, 97), (199, 138, 61), (124, 101, 105)]
 data_color_adjustment_value = 50  # pts
@@ -41,14 +41,14 @@ for ii in range(len(line_colors)):
     line_colors[ii] = tuple([value / 255 for value in line_colors[ii]])
     data_colors.append(tuple([value + (data_color_adjustment_value / 255) for value in line_colors[ii]]))
 
-if create_centroid_graph:
+if create_force_graph:
 
     # Make sure all data is the right size
     if len(time_stamps) != len(data_colors) != len(line_colors) != len(data_types):
         raise Exception("Data sources and number of colors do not match for the uncontrolled data.")
 
     # Create a figure and axes to plot the results
-    fig, axes = subplots(nrows=1, ncols=1)
+    fig, axes = subplots(nrows=1, ncols=1, figsize=(FIG_WIDTH, FIG_HEIGHT))
 
     # Define a counter to for the trial number
     trial_number = 1
@@ -65,15 +65,15 @@ if create_centroid_graph:
 
         # Build the path according to the data type
         if data_type == CONTROLLED:
-            source_path = (BASIC_SOURCE_PATH + 'Controlled/' + time_stamp + '_experiment/Centroid_' + time_stamp + '.csv')
+            source_path = (BASIC_SOURCE_PATH + 'Controlled/' + time_stamp + '_experiment/SkinError_' + time_stamp + '.csv')
         elif data_type == UNCONTROLLED:
-            source_path = (BASIC_SOURCE_PATH + 'Uncontrolled/' + time_stamp + '_experiment/Centroid_' + time_stamp + '.csv')
+            source_path = (BASIC_SOURCE_PATH + 'Uncontrolled/' + time_stamp + '_experiment/SkinError_' + time_stamp + '.csv')
         else:
             raise Exception(str(data_type) + ' is not a recognized data type.')
 
         # Read the data from the file
         data = read_recorded_data_csv(file_path=source_path,
-                                      headings=[MESSAGE_ID, STAMP_SECS, STAMP_NSECS, IMAGE_CENTROID],
+                                      headings=[MESSAGE_ID, STAMP_SECS, STAMP_NSECS, SKIN_ERROR],
                                       sort_heading=MESSAGE_ID,
                                       additional_headings_to_zero=[STAMP_SECS])
 
@@ -82,35 +82,44 @@ if create_centroid_graph:
 
         # Define variables for convenience
         data_x = data[COMBINED_STAMP][::point_sampling_rate]
-        data_y = data[IMAGE_CENTROID][::point_sampling_rate]
+        data_y = data[SKIN_ERROR][::point_sampling_rate]
+        data_y = [rad2deg(atan2(y, 1)) for y in data_y]
         data_y_std_dev = stdev(data_y)
 
         # Calculate the line of best fit for the data
-        line_estimation = Polynomial.fit(data_x, data_y, deg=12)
+        line_estimation = Polynomial.fit(data_x, data_y, deg=4)
         estimated_data_y = [line_estimation(x) for x in data_x]
 
         shade_data_y_std_dev = stdev([y_real - y_estimate for y_real, y_estimate in zip(data_y, estimated_data_y)])
 
+        # Set the line-style to use
+        if data_type == CONTROLLED:
+            line_style = 'dashed'
+        elif data_type == UNCONTROLLED:
+            line_style = 'solid'
+        else:
+            raise Exception("Line style given is not a recognized style.")
+
         # Plot the line of best fit
         axes.plot(data_x, estimated_data_y,
-                  color=line_color, label='Trial ' + str(trial_number) + ' Data')
+                  color=line_color, linestyle=line_style, label='Trial ' + str(trial_number) + ' - ' + data_type)
         axes.fill_between(data_x, [y - shade_data_y_std_dev for y in estimated_data_y],
                           [y + shade_data_y_std_dev for y in estimated_data_y],
                           alpha=0.35, facecolor=data_color)
 
         # Update the uncontrolled data change
         if data_type == UNCONTROLLED:
-            uncontrolled_data_change = uncontrolled_data_change + [data[IMAGE_CENTROID][-1] - data[IMAGE_CENTROID][0]]
+            uncontrolled_data_change = uncontrolled_data_change + [data[SKIN_ERROR][-1] - data[SKIN_ERROR][0]]
 
         # Update the complete controlled data list
         if data_type == CONTROLLED:
-            completed_controlled_data = completed_controlled_data + data[IMAGE_CENTROID]
+            completed_controlled_data = completed_controlled_data + data[SKIN_ERROR]
 
         # Increment the trial number
         trial_number = trial_number + 1
 
     if len(completed_controlled_data) > 0:
-        print('Median Force Value: ' + str(median(completed_controlled_data)))
+        print('Mean Angle Value: ' + str(mean(completed_controlled_data)))
         if len(completed_controlled_data) > 1:
             print("Standard Deviation of Force Value: " + str(stdev(completed_controlled_data)))
     if len(uncontrolled_data_change) > 0:
@@ -121,7 +130,7 @@ if create_centroid_graph:
     # Set the parameters for the figure
     axes.grid(axis='y')
     axes.set_xlabel(COMBINED_STAMP)
-    axes.set_ylabel("Centroid Error (px)")
+    axes.set_ylabel("Slope of Approximation Line")
 
     # Add the legend
     axes.legend()
@@ -133,7 +142,7 @@ if create_pose_graph:
         raise Exception("Data sources and number of colors do not match for the uncontrolled data.")
 
     # Create a figure and axes to plot the results
-    fig, axes = subplots(nrows=1, ncols=1)
+    fig, axes = subplots(nrows=1, ncols=1, figsize=(FIG_WIDTH, FIG_HEIGHT))
 
     # Define a counter to for the trial number
     trial_number = 1
@@ -177,9 +186,17 @@ if create_pose_graph:
 
         shade_data_y_std_dev = stdev([y_real - y_estimate for y_real, y_estimate in zip(data_y, estimated_data_y)])
 
+        # Set the line-style to use
+        if data_type == CONTROLLED:
+            line_style = 'dashed'
+        elif data_type == UNCONTROLLED:
+            line_style = 'solid'
+        else:
+            raise Exception("Line style given is not a recognized style.")
+
         # Plot the line of best fit
         axes.plot(data_x, estimated_data_y,
-                  color=line_color, label='Trial ' + str(trial_number) + ' Data')
+                  color=line_color, linestyle=line_style, label='Trial ' + str(trial_number) + ' - ' + data_type)
         axes.fill_between(data_x, [y - shade_data_y_std_dev for y in estimated_data_y],
                           [y + shade_data_y_std_dev for y in estimated_data_y],
                           alpha=0.35, facecolor=data_color)
@@ -190,7 +207,7 @@ if create_pose_graph:
     # Set the parameters for the figure
     axes.grid(axis='y')
     axes.set_xlabel(COMBINED_STAMP)
-    axes.set_ylabel(POSE_ROLL)
+    axes.set_ylabel('Roll Angle of Probe\n w.r.t. Robot Origin (deg)')
 
     # Add the legend
     axes.legend()

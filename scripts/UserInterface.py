@@ -163,21 +163,10 @@ class UserInterface(BasicNode):
         # Wait for the services to be built
         wait_for_service(IPR_REGISTERED_DATA_SAVE_LOCATION)
         wait_for_service(NRTS_REGISTERED_DATA_LOAD_LOCATION)
+        wait_for_service(VG_REGISTERED_DATA_LOAD_LOCATION)
         wait_for_service(VG_VOLUME_DATA_SAVE_LOCATION)
-        # wait_for_service(TM_OVERRIDE_PATIENT_CONTACT)
-        # wait_for_service(TM_OVERRIDE_FORCE_CONTROL)
-        # wait_for_service(TM_OVERRIDE_IMAGE_BALANCED)
-        # wait_for_service(TM_OVERRIDE_IMAGE_CENTERED)
-        # wait_for_service(TM_OVERRIDE_DATA_REGISTERED)
-        # wait_for_service(RC_OVERRIDE_PATIENT_CONTACT)
-        # wait_for_service(RC_OVERRIDE_FORCE_CONTROL)
-        # wait_for_service(RC_OVERRIDE_IMAGE_BALANCED)
-        # wait_for_service(RC_OVERRIDE_IMAGE_CENTERED)
-        # wait_for_service(CREATE_TRAJECTORY)
-        # wait_for_service(CLEAR_TRAJECTORY)
-        # wait_for_service(REGISTERED_DATA_SAVE_LOCATION)
-        try:
 
+        try:
             # Define the trajectory management node client proxies
             self.tm_override_patient_contact_service = ServiceProxy(TM_OVERRIDE_PATIENT_CONTACT, BoolRequest)
             self.tm_override_force_control_service = ServiceProxy(TM_OVERRIDE_FORCE_CONTROL, BoolRequest)
@@ -187,7 +176,10 @@ class UserInterface(BasicNode):
             self.create_trajectory_service = ServiceProxy(TM_CREATE_TRAJECTORY, Float64Request)
             self.clear_trajectory_service = ServiceProxy(TM_CLEAR_TRAJECTORY, BoolRequest)
             self.registered_data_save_location_service = ServiceProxy(IPR_REGISTERED_DATA_SAVE_LOCATION, StringRequest)
+        except ServiceException:
+            pass
 
+        try:
             # Define the robot control node client proxies
             self.rc_override_patient_contact_service = ServiceProxy(RC_OVERRIDE_PATIENT_CONTACT, BoolRequest)
             self.view_controller_gains_service = ServiceProxy(RC_VIEW_CONTROLLER_GAINS, ViewControllerGains)
@@ -198,7 +190,6 @@ class UserInterface(BasicNode):
             self.use_image_feedback_command_service = ServiceProxy(RC_USE_IMAGE_CENTERING, BoolRequest)
             self.use_balancing_feedback_command_service = ServiceProxy(RC_USE_IMAGE_BALANCING, BoolRequest)
             self.publish_controller_statuses_service = ServiceProxy(RC_PUBLISH_CONTROLLER_STATUSES, BoolRequest)
-
         except ServiceException:
             pass
 
@@ -221,10 +212,13 @@ class UserInterface(BasicNode):
                                                                          BoolRequest)
 
         # Define the non-real-time segmentation node service proxies
-        self.registered_data_load_location_service = ServiceProxy(NRTS_REGISTERED_DATA_LOAD_LOCATION, StringRequest)
+        self.nrts_registered_data_load_location_service = ServiceProxy(NRTS_REGISTERED_DATA_LOAD_LOCATION,
+                                                                       StringRequest)
         self.nrts_generate_volume_command_service = ServiceProxy(NRTS_GENERATE_VOLUME, BoolRequest)
 
         # Define the volume generation node service proxies
+        self.vg_registered_data_load_location_service = ServiceProxy(VG_REGISTERED_DATA_LOAD_LOCATION,
+                                                                     StringRequest)
         self.vg_generate_volume_command_service = ServiceProxy(VG_GENERATE_VOLUME, BoolRequest)
         self.display_loaded_volume_command_service = ServiceProxy(VG_DISPLAY_VOLUME, BoolRequest)
         self.volume_data_save_location_service = ServiceProxy(VG_VOLUME_DATA_SAVE_LOCATION, StringRequest)
@@ -642,9 +636,7 @@ class UserInterface(BasicNode):
                                   col_span=TWO_COLUMN, row_num=dd)
 
         # Define the current location variable label
-        self.registered_data_save_location_str_var = StringVar(thyroid_exam_frame,
-                                                               "/home/ben/thyroid_ultrasound_data"
-                                                               "/testing_and_validation/registered_data")
+        self.registered_data_save_location_str_var = StringVar(thyroid_exam_frame, '')
         dd = create_widget_object(
             ttk.Label(thyroid_exam_frame, textvariable=self.registered_data_save_location_str_var),
             col_num=L_MIDDLE_COLUMN, col_span=FULL_WIDTH - TWO_COLUMN,
@@ -670,12 +662,14 @@ class UserInterface(BasicNode):
 
         # Define the scan positive button
         self.scan_positive_button = ttk.Button(thyroid_exam_frame, text="Scan Positive",
-                                               command=self.scan_positive_button_callback)
+                                               command=self.scan_positive_button_callback,
+                                               state=DISABLED)
         dd = create_widget_object(self.scan_positive_button, col_num=R_MIDDLE_COLUMN, row_num=dd)
 
         # Define the scan negative button
         self.scan_negative_button = ttk.Button(thyroid_exam_frame, text="Scan Negative",
-                                               command=self.scan_negative_button_callback)
+                                               command=self.scan_negative_button_callback,
+                                               state=DISABLED)
         dd = create_widget_object(self.scan_negative_button, col_num=RIGHT_COLUMN, row_num=dd, increment_row=True)
 
         # Create a horizontal separator
@@ -698,8 +692,7 @@ class UserInterface(BasicNode):
                                   col_span=TWO_COLUMN, row_num=dd)
 
         # Define the registered data load location variable
-        self.registered_data_load_location_str_var = StringVar(thyroid_exam_frame,
-                                                               self.registered_data_save_location_str_var.get())
+        self.registered_data_load_location_str_var = StringVar(thyroid_exam_frame, '')
         dd = create_widget_object(ttk.Label(thyroid_exam_frame,
                                             textvariable=self.registered_data_load_location_str_var),
                                   col_num=L_MIDDLE_COLUMN, col_span=FULL_WIDTH - TWO_COLUMN,
@@ -717,16 +710,16 @@ class UserInterface(BasicNode):
                                   col_span=TWO_COLUMN, row_num=dd)
 
         # Define volume data save location label
-        self.volume_data_save_location_str_var = StringVar(thyroid_exam_frame,
-                                                           "/home/ben/thyroid_ultrasound_data"
-                                                           "/testing_and_validation/volume_data")
+        self.volume_data_save_location_str_var = StringVar(thyroid_exam_frame, '')
         dd = create_widget_object(ttk.Label(thyroid_exam_frame, textvariable=self.volume_data_save_location_str_var),
                                   col_num=L_MIDDLE_COLUMN, col_span=FULL_WIDTH - TWO_COLUMN,
                                   row_num=dd, increment_row=True)
 
         # Define generate volume button
-        dd = create_widget_object(ttk.Button(thyroid_exam_frame, text='Generate New Volume',
-                                             command=self.generate_volume_button_callback), col_num=LEFT_COLUMN,
+        self.generate_new_volume_button = ttk.Button(thyroid_exam_frame, text='Generate New Volume',
+                                                     command=self.generate_volume_button_callback,
+                                                     state=DISABLED)
+        dd = create_widget_object(self.generate_new_volume_button, col_num=LEFT_COLUMN,
                                   col_span=FULL_WIDTH, row_num=dd, increment_row=True)
 
         # Create a horizontal separator
@@ -747,9 +740,7 @@ class UserInterface(BasicNode):
                                   col_span=TWO_COLUMN, row_num=dd)
 
         # Define volume data load location label
-        self.volume_data_load_location_str_var = StringVar(thyroid_exam_frame,
-                                                           "/home/ben/thyroid_ultrasound_data"
-                                                           "/testing_and_validation/volume_data")
+        self.volume_data_load_location_str_var = StringVar(thyroid_exam_frame, '')
         dd = create_widget_object(ttk.Label(thyroid_exam_frame, textvariable=self.volume_data_load_location_str_var),
                                   col_num=L_MIDDLE_COLUMN, col_span=FULL_WIDTH - TWO_COLUMN,
                                   row_num=dd, increment_row=True)
@@ -1333,31 +1324,56 @@ class UserInterface(BasicNode):
         """
         Select the directory in which to save the registered data, publishes it, and displays it.
         """
-        selected_directory = askdirectory(initialdir=self.registered_data_save_location_str_var.get(),
+        if len(self.registered_data_save_location_str_var.get()) < 3:
+            directory_to_look_in = '/home/ben/thyroid_ultrasound_data/testing_and_validation/registered_data'
+        else:
+            directory_to_look_in = self.registered_data_save_location_str_var.get()
+        selected_directory = askdirectory(initialdir=directory_to_look_in,
                                           title="Select the destination for the exam data.")
         if len(selected_directory) > 3 and isdir(selected_directory):
             self.registered_data_save_location_service(selected_directory)
             self.registered_data_save_location_str_var.set(selected_directory)
+            self.scan_positive_button[WIDGET_STATE] = NORMAL
+            self.scan_negative_button[WIDGET_STATE] = NORMAL
 
     def registered_data_load_location_button_callback(self) -> None:
         """
         Select the directory from which to load the data used to generate the volume. Then publish it and display it.
         """
-        selected_directory = askdirectory(initialdir=self.registered_data_load_location_str_var.get(),
+        if len(self.registered_data_load_location_str_var.get()) > 3:
+            directory_to_look_in = self.registered_data_load_location_str_var.get()[
+                                   :self.registered_data_load_location_str_var.get().rfind('/')]
+        else:
+            if len(self.registered_data_save_location_str_var.get()) > 3:
+                directory_to_look_in = self.registered_data_save_location_str_var.get()
+            else:
+                directory_to_look_in = '/home/ben/thyroid_ultrasound_data/testing_and_validation/registered_data'
+        selected_directory = askdirectory(initialdir=directory_to_look_in,
                                           title="Select the data to load to generate the volume.")
         if len(selected_directory) > 3 and isdir(selected_directory):
-            self.registered_data_load_location_service(selected_directory)
+            self.nrts_registered_data_load_location_service(selected_directory)
+            self.vg_registered_data_load_location_service(selected_directory)
             self.registered_data_load_location_str_var.set(selected_directory)
+            if len(self.registered_data_load_location_str_var.get()) > 3 and \
+                    len(self.volume_data_save_location_str_var.get()) > 3:
+                self.generate_new_volume_button[WIDGET_STATE] = NORMAL
 
     def volume_data_save_location_button_callback(self) -> None:
         """
         Select the directory in which to save the volume data, publish it, and display it.
         """
-        selected_directory = askdirectory(initialdir=self.volume_data_save_location_str_var.get(),
+        if len(self.volume_data_save_location_str_var.get()) > 3:
+            directory_to_look_in = self.volume_data_save_location_str_var.get()
+        else:
+            directory_to_look_in = "/home/ben/thyroid_ultrasound_data/testing_and_validation/volume_data"
+        selected_directory = askdirectory(initialdir=directory_to_look_in,
                                           title="Select the destination for the volume data.")
         if len(selected_directory) > 3 and isdir(selected_directory):
             self.volume_data_save_location_service(selected_directory)
             self.volume_data_save_location_str_var.set(selected_directory)
+            if len(self.registered_data_load_location_str_var.get()) > 3 and \
+                    len(self.volume_data_save_location_str_var.get()) > 3:
+                self.generate_new_volume_button[WIDGET_STATE] = NORMAL
 
     def volume_data_result_callback(self, msg: Float64):
         self.volume_data_result_str_var.set(str(round(msg.data, 2)))
@@ -1408,7 +1424,15 @@ class UserInterface(BasicNode):
         self.volume_data_result_str_var.set('0.00')
 
     def volume_data_load_location_button_callback(self) -> None:
-        selected_directory = askdirectory(initialdir=self.volume_data_load_location_str_var.get(),
+        if len(self.volume_data_load_location_str_var.get()) > 3:
+            directory_to_look_in = self.volume_data_load_location_str_var.get()[
+                                   :self.volume_data_load_location_str_var.get().rfind('/')]
+        else:
+            if len(self.volume_data_save_location_str_var.get()) > 3:
+                directory_to_look_in = self.volume_data_save_location_str_var.get()
+            else:
+                directory_to_look_in = "/home/ben/thyroid_ultrasound_data/testing_and_validation/volume_data"
+        selected_directory = askdirectory(initialdir=directory_to_look_in,
                                           title="Select the the volume data to load.")
         if len(selected_directory) > 3 and isdir(selected_directory):
             self.volume_data_load_location_service(selected_directory)
@@ -1888,14 +1912,6 @@ class UserInterface(BasicNode):
     # endregion
     #############################################################################
 
-    def first_time_publishing_loop(self):
-        """
-        Publishes messages a single time on startup.
-        """
-        self.registered_data_save_location_service(self.registered_data_save_location_str_var.get())
-        self.registered_data_load_location_service(self.registered_data_load_location_str_var.get())
-        self.volume_data_save_location_service(self.volume_data_save_location_str_var.get())
-
     def publishing_loop(self):
         """
         Publishes the different commands at regular intervals.
@@ -1976,9 +1992,6 @@ if __name__ == "__main__":
 
     # Create the control application within the root window
     node = UserInterface(root)
-
-    # Run the first loop publishers
-    node.first_time_publishing_loop()
 
     print("Node initialized.")
     print("Press ctrl+c to terminate.")

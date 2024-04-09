@@ -1,12 +1,14 @@
 # Import standard python packages
 from csv import DictReader
 from matplotlib.pyplot import show, subplots, rc, figure
-from numpy import array
+from numpy import array, rad2deg
 from statistics import median, stdev, mean
 
 # Import custom python packages
-from ExperimentalDataRecorder import MESSAGE_ID, STAMP_SECS, STAMP_NSECS, POSE_X, POSE_Y, POSE_Z, \
-    POSE_ROLL, POSE_PITCH, POSE_YAW, WAYPOINT_REACHED
+from ExperimentalDataRecorder import MESSAGE_ID, STAMP_SECS, STAMP_NSECS, FORCE, \
+    POSE_X, POSE_Y, POSE_Z, POSE_ROLL, POSE_PITCH, POSE_YAW, WAYPOINT_REACHED, SKIN_ERROR
+from Graphing.read_recorded_data_csv import read_recorded_data_csv, COMBINED_STAMP, CONTROLLED, UNCONTROLLED,\
+    FIG_WIDTH, FIG_HEIGHT
 from thyroid_ultrasound_robot_control_support.Helpers.calc_inverse import calc_inverse
 from thyroid_ultrasound_robot_control_support.Helpers.calc_straight_line_distance import calc_straight_line_distance
 from thyroid_ultrasound_robot_control_support.Helpers.calc_transformation_from_rpy import calc_transformation_from_rpy
@@ -53,7 +55,7 @@ temp_results_dict = {MESSAGE_ID: [], COMBINED_STAMP: [], POSE_X: [], POSE_Y: [],
 final_results_dict = {MESSAGE_ID: [], COMBINED_STAMP: [], POSE_X: [], POSE_Y: [], POSE_Z: [],
                       POSE_ROLL: [], POSE_PITCH: [], POSE_YAW: [],
                       STRAIGHT_LINE_DISTANCE: [], PROBE_X_DISTANCE: [], PROBE_Y_DISTANCE: [], PROBE_Z_DISTANCE: []}
-waypoints = {COMBINED_STAMP: [], POSE_X: []}
+waypoints = {COMBINED_STAMP: [], POSE_X: [], POSE_PITCH: [], POSE_YAW: []}
 # Open the file
 source_file = open(POSE_FILE_PATH, mode='r')
 source_file_reader = DictReader(source_file)
@@ -130,15 +132,31 @@ for message_id, seconds_stamp, pose_x, pose_y, pose_z, pose_roll, pose_pitch, po
     if waypoint_reached:
         waypoints[COMBINED_STAMP].append(seconds_stamp - min_stamp)
         waypoints[POSE_X].append(abs(position[0][0]))
+        waypoints[POSE_PITCH].append(pose_pitch)
+        waypoints[POSE_YAW].append(pose_yaw)
 
 distance_between_waypoints = [waypoints[POSE_X][ii] - waypoints[POSE_X][ii - 1] for ii in range(2, len(waypoints[POSE_X]))]
 clean_distance_between_waypoints = []
 for distance in distance_between_waypoints:
     if abs(distance) > 10 ** -4:
         clean_distance_between_waypoints.append(distance)
-print(mean(clean_distance_between_waypoints))
-print(median(clean_distance_between_waypoints))
-print(stdev(clean_distance_between_waypoints))
+
+print("Distance between waypoints")
+print("Mean: " + str(mean(clean_distance_between_waypoints)))
+print("Median: " + str(median(clean_distance_between_waypoints)))
+print("Std Dev: " + str(stdev(clean_distance_between_waypoints)))
+
+
+print("Pose Pitch Desired: " + str(final_results_dict[POSE_PITCH][0]))
+print("Mean: " + str(mean(waypoints[POSE_PITCH])))
+print("Median: " + str(median(waypoints[POSE_PITCH])))
+print("Std Dev: " + str(stdev(waypoints[POSE_PITCH])))
+
+print("Pose Yaw Desired: " + str(final_results_dict[POSE_YAW][0]))
+print("Mean: " + str(mean(waypoints[POSE_YAW])))
+print("Median: " + str(median(waypoints[POSE_YAW])))
+print("Std Dev: " + str(stdev(waypoints[POSE_YAW])))
+
 
 # Define the sampling rate for the points included in the plot
 point_sampling_rate = 2

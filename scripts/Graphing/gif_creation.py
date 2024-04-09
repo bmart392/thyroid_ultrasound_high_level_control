@@ -8,16 +8,16 @@ RESULT_FOLDER: str = '/home/ben/Documents/Thesis/Visuals'
 SOURCE_FOLDER: str = '/home/ben/thyroid_ultrasound_data/experimentation'
 
 # Define the image sources to use
-# folders = ['BalanceControl', 'BalanceControl', 'BalanceControl', 'BalanceControl', 'BalanceControl', 'BalanceControl']
-# control_types = ['Uncontrolled', 'Uncontrolled', 'Uncontrolled', 'Controlled', 'Controlled', 'Controlled']
-# timestamps = ['2024-03-10_10-41-54-154715', '2024-03-10_10-44-54-134848', '2024-03-10_10-47-30-414361',
-#               '2024-03-10_10-54-15-624089', '2024-03-10_11-56-29-382349', '2024-03-10_12-04-31-643835']
-# down_sampling_rates = [15, 15, 15, 16, 28, 15]
-folders = ['ImageControl', 'ImageControl', 'ImageControl', 'ImageControl', 'ImageControl', 'ImageControl']
+folders = ['BalanceControl', 'BalanceControl', 'BalanceControl', 'BalanceControl', 'BalanceControl', 'BalanceControl']
 control_types = ['Uncontrolled', 'Uncontrolled', 'Uncontrolled', 'Controlled', 'Controlled', 'Controlled']
-timestamps = ['2024-03-10_14-15-50-095346', '2024-03-10_14-21-52-993521', '2024-03-10_14-31-34-704117',
-              '2024-03-10_12-47-29-098133', '2024-03-10_14-08-58-467311', '2024-03-10_14-12-28-780537']
+timestamps = ['2024-03-10_10-41-54-154715', '2024-03-10_10-44-54-134848', '2024-03-10_10-47-30-414361',
+              '2024-03-10_10-54-15-624089', '2024-03-10_11-56-29-382349', '2024-03-10_12-04-31-643835']
 down_sampling_rates = [15, 15, 15, 16, 28, 15]
+# folders = ['ImageControl', 'ImageControl', 'ImageControl', 'ImageControl', 'ImageControl', 'ImageControl']
+# control_types = ['Uncontrolled', 'Uncontrolled', 'Uncontrolled', 'Controlled', 'Controlled', 'Controlled']
+# timestamps = ['2024-03-10_14-15-50-095346', '2024-03-10_14-21-52-993521', '2024-03-10_14-31-34-704117',
+#               '2024-03-10_12-47-29-098133', '2024-03-10_14-08-58-467311', '2024-03-10_14-12-28-780537']
+# down_sampling_rates = [15, 15, 15, 16, 28, 15]
 
 for folder, control_type, timestamp, down_sampling_rate in zip(folders, control_types,
                                                                timestamps, down_sampling_rates):
@@ -44,4 +44,4 @@ for folder, control_type, timestamp, down_sampling_rate in zip(folders, control_
     iio.imwrite(gif_path, images)
 
     # Optimize the gif
-    optimize(gif_path)
+    # optimize(gif_path)

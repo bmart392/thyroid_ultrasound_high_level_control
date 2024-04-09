@@ -12,8 +12,12 @@ SORT_DESCENDING: str = 'Sort Descending'
 COMBINED_STAMP: str = 'Elapsed Time (s)'
 
 # Define the types of data that will be graphed
-CONTROLLED = 'controlled'
-UNCONTROLLED = 'uncontrolled'
+CONTROLLED = 'Controlled'
+UNCONTROLLED = 'Uncontrolled'
+
+# Define the default width and height of figures
+FIG_WIDTH: float = 8
+FIG_HEIGHT: float = (9/16) * FIG_WIDTH
 
 
 def read_recorded_data_csv(file_path: str,

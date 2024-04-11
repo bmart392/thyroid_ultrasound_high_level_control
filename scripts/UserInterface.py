@@ -6,9 +6,6 @@ File containing UserInterface class.
 # TODO - Dream - Turn this into a better error logging device. Show message, time sent, and node sending
 # TODO - Dream - Create an option to see minimal, standard, or verbose logging data.
 # TODO - Dream - Add a command to stop all motion and return all states back to the robot not moving
-# TODO - Dream - Add controls to select which visualizations to hide and show
-# TODO - Low - Add logic to view a previously generated volume
-# TODO - Low - Publish overall speed factor more frequently
 
 # Import standard packages
 from tkinter import *
@@ -21,6 +18,9 @@ from os.path import isdir
 # Import ROS packages
 from geometry_msgs.msg import WrenchStamped, TwistStamped, Twist
 from std_msgs.msg import Int8
+
+# Import custom python packages
+from thyroid_ultrasound_imaging_support.Visualization.VisualizationConstants import *
 
 # Import custom ROS packages
 from thyroid_ultrasound_support.BasicNode import *
@@ -71,6 +71,8 @@ PLAYBACK_STREAM_IN_CHRONOLOGICAL_ORDER: str = "Playback images in chronological 
 PLAYBACK_STREAM_IN_REVERSE_CHRONOLOGICAL_ORDER: str = "Playback images in reverse chronological order."
 START_PUBLISHING_CONTROLLER_STATUS_VALUES: str = "Start publishing controller status values."
 STOP_PUBLISHING_CONTROLLER_STATUS_VALUES: str = "Stop publishing controller status values."
+ACTIVATE_MANUAL_CONTROLS: str = "Activate\nManual Controls"
+DEACTIVATE_MANUAL_CONTROLS: str = "Deactivate\nManual Controls"
 
 # Define constants for parameters of widgets
 WIDGET_TEXT: str = 'text'
@@ -174,6 +176,7 @@ class UserInterface(BasicNode):
             self.tm_override_image_centered_service = ServiceProxy(TM_OVERRIDE_IMAGE_CENTERED, BoolRequest)
             self.tm_override_data_registered_service = ServiceProxy(TM_OVERRIDE_DATA_REGISTERED, BoolRequest)
             self.create_trajectory_service = ServiceProxy(TM_CREATE_TRAJECTORY, Float64Request)
+            self.image_spacing_selection_service = ServiceProxy(TM_SET_TRAJECTORY_SPACING, Float64Request)
             self.clear_trajectory_service = ServiceProxy(TM_CLEAR_TRAJECTORY, BoolRequest)
             self.registered_data_save_location_service = ServiceProxy(IPR_REGISTERED_DATA_SAVE_LOCATION, StringRequest)
         except ServiceException:
@@ -223,6 +226,30 @@ class UserInterface(BasicNode):
         self.display_loaded_volume_command_service = ServiceProxy(VG_DISPLAY_VOLUME, BoolRequest)
         self.volume_data_save_location_service = ServiceProxy(VG_VOLUME_DATA_SAVE_LOCATION, StringRequest)
         self.volume_data_load_location_service = ServiceProxy(VG_VOLUME_DATA_LOAD_LOCATION, StringRequest)
+
+        # Define the volume generation node service proxies
+        self.show_visualization_services = {}
+        for visualization_name, service_name in zip([SHOW_ORIGINAL, SHOW_CROPPED, SHOW_RECOLOR, SHOW_BLUR, SHOW_MASK,
+                                                     SHOW_POST_PROCESSED_MASK, SHOW_SURE_FOREGROUND,
+                                                     SHOW_SURE_BACKGROUND, SHOW_PROBABLE_FOREGROUND,
+                                                     SHOW_INITIALIZED_MASK, SHOW_CENTROIDS_ONLY,
+                                                     SHOW_CENTROIDS_CROSS_ONLY, SHOW_MASK_CENTROIDS_CROSS_OVERLAY,
+                                                     SHOW_FOREGROUND, SHOW_SKIN_APPROXIMATION,
+                                                     SHOW_GRABCUT_USER_INITIALIZATION_0],
+                                                    [VIS_STATUS_SHOW_ORIGINAL, VIS_STATUS_SHOW_CROPPED,
+                                                     VIS_STATUS_SHOW_RECOLOR, VIS_STATUS_SHOW_BLUR,
+                                                     VIS_STATUS_SHOW_RESULT_MASK, VIS_STATUS_SHOW_POST_PROCESSED_MASK,
+                                                     VIS_STATUS_SHOW_SURE_FOREGROUND, VIS_STATUS_SHOW_SURE_BACKGROUND,
+                                                     VIS_STATUS_SHOW_PROBABLE_FOREGROUND,
+                                                     VIS_STATUS_SHOW_INITIALIZATION_MASK,
+                                                     VIS_STATUS_SHOW_CENTROIDS_ONLY,
+                                                     VIS_STATUS_SHOW_CENTROIDS_CROSS_ONLY,
+                                                     VIS_STATUS_SHOW_MASK_CENTROIDS_CROSS_OVERLAY,
+                                                     VIS_STATUS_SHOW_FOREGROUND,
+                                                     VIS_STATUS_SHOW_SKIN_APPROXIMATION,
+                                                     VIS_STATUS_SHOW_GRABCUT_USER_INITIALIZATION_0]):
+            self.show_visualization_services.update({visualization_name: ServiceProxy(service_name,
+                                                                                      StatusVisualization)})
 
         # Create a publisher to publish the command to start and stop the robot motion
         # self.stop_robot_motion_command_publisher = Publisher(STOP_ALL_MOTION, Bool, queue_size=1)
@@ -347,7 +374,8 @@ class UserInterface(BasicNode):
 
         # Define the trajectory following widget
         self.trajectory_following_button = ttk.Button(button_controls_frame, text=PAUSE_TRAJECTORY,
-                                                      command=self.trajectory_following_button_callback, state=DISABLED)
+                                                      command=self.trajectory_following_button_callback,
+                                                      state=DISABLED)
         aa = create_widget_object(self.trajectory_following_button, col_num=RL_MIDDLE_COLUMN, row_num=aa)
 
         # Define the pose control widget
@@ -369,54 +397,71 @@ class UserInterface(BasicNode):
 
         bb = create_horizontal_separator(robot_controls_frame, bb)
 
+        # Define the activation widget
+        self.manual_controls_status_button = ttk.Button(robot_controls_frame, text=ACTIVATE_MANUAL_CONTROLS,
+                                                        command=self.manual_controls_status_button_callback)
+        bb = create_widget_object(self.manual_controls_status_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                  row_num=bb, increment_row=True)
+
+        bb = create_horizontal_separator(robot_controls_frame, bb)
+
         # Define the negative x widget
-        self.negative_x_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_X, width=5)
+        self.negative_x_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_X, width=5, state=DISABLED)
         self.negative_x_movement_button.bind(BUTTON_PRESS,
                                              lambda event, axis_and_direction=NEGATIVE_X:
-                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+                                             self.robot_control_button_callback(
+                                                 axis_and_direction=axis_and_direction))
         self.negative_x_movement_button.bind(BUTTON_RELEASE,
                                              lambda event, axis_and_direction=NO_MOVEMENT:
-                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+                                             self.robot_control_button_callback(
+                                                 axis_and_direction=axis_and_direction))
         bb = create_widget_object(self.negative_x_movement_button, col_num=LEFT_COLUMN, row_num=bb)
 
         # Define the positive x widget
-        self.positive_x_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_X, width=5)
+        self.positive_x_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_X, width=5, state=DISABLED)
         self.positive_x_movement_button.bind(BUTTON_PRESS,
                                              lambda event, axis_and_direction=POSITIVE_X:
-                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+                                             self.robot_control_button_callback(
+                                                 axis_and_direction=axis_and_direction))
         self.positive_x_movement_button.bind(BUTTON_RELEASE,
                                              lambda event, axis_and_direction=NO_MOVEMENT:
-                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+                                             self.robot_control_button_callback(
+                                                 axis_and_direction=axis_and_direction))
         bb = create_widget_object(self.positive_x_movement_button, col_num=RIGHT_COLUMN, row_num=bb,
                                   increment_row=True)
 
         bb = create_horizontal_separator(robot_controls_frame, bb)
 
         # Define the negative y widget
-        self.negative_y_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_Y, width=5)
+        self.negative_y_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_Y, width=5, state=DISABLED)
         self.negative_y_movement_button.bind(BUTTON_PRESS,
                                              lambda event, axis_and_direction=NEGATIVE_Y:
-                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+                                             self.robot_control_button_callback(
+                                                 axis_and_direction=axis_and_direction))
         self.negative_y_movement_button.bind(BUTTON_RELEASE,
                                              lambda event, axis_and_direction=NO_MOVEMENT:
-                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+                                             self.robot_control_button_callback(
+                                                 axis_and_direction=axis_and_direction))
         bb = create_widget_object(self.negative_y_movement_button, col_num=LEFT_COLUMN, row_num=bb)
 
         # Define the positive y widget
-        self.positive_y_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_Y, width=5)
+        self.positive_y_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_Y, width=5, state=DISABLED)
         self.positive_y_movement_button.bind(BUTTON_PRESS,
                                              lambda event, axis_and_direction=POSITIVE_Y:
-                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+                                             self.robot_control_button_callback(
+                                                 axis_and_direction=axis_and_direction))
         self.positive_y_movement_button.bind(BUTTON_RELEASE,
                                              lambda event, axis_and_direction=NO_MOVEMENT:
-                                             self.robot_control_button_callback(axis_and_direction=axis_and_direction))
+                                             self.robot_control_button_callback(
+                                                 axis_and_direction=axis_and_direction))
         bb = create_widget_object(self.positive_y_movement_button, col_num=RIGHT_COLUMN, row_num=bb,
                                   increment_row=True)
 
         bb = create_horizontal_separator(robot_controls_frame, bb)
 
         # Define the negative pitch widget
-        self.negative_pitch_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_PITCH, width=5)
+        self.negative_pitch_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_PITCH, width=5,
+                                                         state=DISABLED)
         self.negative_pitch_movement_button.bind(BUTTON_PRESS,
                                                  lambda event, axis_and_direction=NEGATIVE_PITCH:
                                                  self.robot_control_button_callback(
@@ -428,7 +473,8 @@ class UserInterface(BasicNode):
         bb = create_widget_object(self.negative_pitch_movement_button, col_num=LEFT_COLUMN, row_num=bb)
 
         # Define the positive pitch button
-        self.positive_pitch_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_PITCH, width=5)
+        self.positive_pitch_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_PITCH, width=5,
+                                                         state=DISABLED)
         self.positive_pitch_movement_button.bind(BUTTON_PRESS,
                                                  lambda event, axis_and_direction=POSITIVE_PITCH:
                                                  self.robot_control_button_callback(
@@ -443,7 +489,8 @@ class UserInterface(BasicNode):
         bb = create_horizontal_separator(robot_controls_frame, bb)
 
         # Define the negative yaw widget
-        self.negative_yaw_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_YAW, width=5)
+        self.negative_yaw_movement_button = ttk.Button(robot_controls_frame, text=NEGATIVE_YAW, width=5,
+                                                       state=DISABLED)
         self.negative_yaw_movement_button.bind(BUTTON_PRESS,
                                                lambda event, axis_and_direction=NEGATIVE_YAW:
                                                self.robot_control_button_callback(
@@ -455,7 +502,8 @@ class UserInterface(BasicNode):
         bb = create_widget_object(self.negative_yaw_movement_button, col_num=LEFT_COLUMN, row_num=bb)
 
         # Define the positive yaw widget
-        self.positive_yaw_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_YAW, width=5)
+        self.positive_yaw_movement_button = ttk.Button(robot_controls_frame, text=POSITIVE_YAW, width=5,
+                                                       state=DISABLED)
         self.positive_yaw_movement_button.bind(BUTTON_PRESS,
                                                lambda event, axis_and_direction=POSITIVE_YAW:
                                                self.robot_control_button_callback(
@@ -467,6 +515,29 @@ class UserInterface(BasicNode):
         bb = create_widget_object(self.positive_yaw_movement_button, col_num=RIGHT_COLUMN, row_num=bb,
                                   increment_row=True)
 
+        bb = create_horizontal_separator(robot_controls_frame, bb)
+
+        # Define speed selector label
+        bb = create_widget_object(ttk.Label(robot_controls_frame, text="Select the overall\nspeed of the robot.",
+                                            anchor=CENTER, justify=CENTER),
+                                  col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=bb, increment_row=True)
+
+        # Define speed selector variable
+        self.speed_selector_variable = IntVar(value=100)
+
+        # Define speed options
+        bb = create_widget_object(
+            Radiobutton(robot_controls_frame, text="Slow", variable=self.speed_selector_variable,
+                        value=50, command=self.speed_selector_callback),
+            col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=bb, increment_row=True)
+        bb = create_widget_object(
+            Radiobutton(robot_controls_frame, text="Normal", variable=self.speed_selector_variable,
+                        value=100, command=self.speed_selector_callback),
+            col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=bb, increment_row=True)
+        bb = create_widget_object(
+            Radiobutton(robot_controls_frame, text="Fast", variable=self.speed_selector_variable,
+                        value=125, command=self.speed_selector_callback),
+            col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=bb, increment_row=True)
         # endregion
 
         # Define the widgets used in the exam_setup_frame
@@ -529,12 +600,13 @@ class UserInterface(BasicNode):
                                   col_num=LEFT_COLUMN, row_num=cc, row_span=DOUBLE_ROW)
 
         # Define the crop selection variable
-        self.select_image_crop_variable = IntVar()
+        self.select_image_crop_variable = IntVar(value=NO_BUTTON)
 
         # Define the crop selection yes option
-        cc = create_widget_object(Radiobutton(exam_setup_frame, text="Yes", variable=self.select_image_crop_variable,
-                                              value=YES_BUTTON, command=self.select_image_crop_callback,
-                                              anchor=CENTER, justify=CENTER), col_num=L_MIDDLE_COLUMN, row_num=cc)
+        cc = create_widget_object(
+            Radiobutton(exam_setup_frame, text="Yes", variable=self.select_image_crop_variable,
+                        value=YES_BUTTON, command=self.select_image_crop_callback,
+                        anchor=CENTER, justify=CENTER), col_num=L_MIDDLE_COLUMN, row_num=cc)
 
         # Define the crop selection no option
         cc = create_widget_object(Radiobutton(exam_setup_frame, text="No", variable=self.select_image_crop_variable,
@@ -542,7 +614,8 @@ class UserInterface(BasicNode):
                                               anchor=CENTER, justify=CENTER), col_num=MIDDLE_COLUMN, row_num=cc)
 
         # Define generate new image cropping button
-        self.generate_new_image_cropping_button = ttk.Button(exam_setup_frame, text="Generate a New\nImage Cropping",
+        self.generate_new_image_cropping_button = ttk.Button(exam_setup_frame,
+                                                             text="Generate a New\nImage Cropping",
                                                              command=self.generate_new_image_cropping_button_callback,
                                                              state=DISABLED)
         cc = create_widget_object(self.generate_new_image_cropping_button, col_num=R_MIDDLE_COLUMN, row_num=cc)
@@ -573,8 +646,9 @@ class UserInterface(BasicNode):
         cc = create_widget_object(ttk.Label(exam_setup_frame, text="cm"), col_num=MIDDLE_COLUMN, row_num=cc)
 
         # Define the send button
-        cc = create_widget_object(ttk.Button(exam_setup_frame, text="Send", command=self.imaging_depth_submit_callback),
-                                  col_num=R_MIDDLE_COLUMN, col_span=TWO_COLUMN, row_num=cc, increment_row=True)
+        cc = create_widget_object(
+            ttk.Button(exam_setup_frame, text="Send", command=self.imaging_depth_submit_callback),
+            col_num=R_MIDDLE_COLUMN, col_span=TWO_COLUMN, row_num=cc, increment_row=True)
 
         # Define a horizontal separator
         cc = create_horizontal_separator(exam_setup_frame, cc)
@@ -583,18 +657,21 @@ class UserInterface(BasicNode):
                                                               text="Identify Region of Interest from Points",
                                                               command=self.identify_thyroid_from_points_button_callback,
                                                               )
-        cc = create_widget_object(self.identify_thyroid_from_points_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+        cc = create_widget_object(self.identify_thyroid_from_points_button, col_num=LEFT_COLUMN,
+                                  col_span=FULL_WIDTH,
                                   row_num=cc, increment_row=True)
 
         # Define a separator
         cc = create_horizontal_separator(exam_setup_frame, cc)
 
         # Define select thyroid side label
-        cc = create_widget_object(ttk.Label(exam_setup_frame, text='Select where to center\n Region of Interest'),
-                                  col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=cc)
+        cc = create_widget_object(
+            ttk.Label(exam_setup_frame, text='Select where to center\n the Region of Interest'),
+            col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=cc)
 
         # Define the centering side variable
-        self.image_centering_side_variable = IntVar()
+        self.image_centering_side_variable = IntVar(value=MIDDLE_BUTTON)
+        self.previous_image_centering_side_variable_value = self.image_centering_side_variable.get()
 
         # Define the image centering left option
         cc = create_widget_object(Radiobutton(exam_setup_frame, text="Left",
@@ -602,17 +679,49 @@ class UserInterface(BasicNode):
                                               value=LEFT_BUTTON, anchor=CENTER, justify=CENTER),
                                   col_num=L_MIDDLE_COLUMN, row_num=cc)
 
-        # Define the crop selection right option
+        # Define the image centering right option
         cc = create_widget_object(Radiobutton(exam_setup_frame, text="Right",
                                               variable=self.image_centering_side_variable,
                                               value=RIGHT_BUTTON, anchor=CENTER, justify=CENTER),
                                   col_num=RIGHT_COLUMN, row_num=cc)
 
-        # Define the crop selection middle option
+        # Define the image centering middle option
         cc = create_widget_object(Radiobutton(exam_setup_frame, text="Middle",
                                               variable=self.image_centering_side_variable,
                                               value=MIDDLE_BUTTON, anchor=CENTER, justify=CENTER),
                                   col_num=R_MIDDLE_COLUMN, row_num=cc, increment_row=True)
+
+        cc = create_horizontal_separator(exam_setup_frame, cc)
+
+        # Define the visualization selection label
+        cc = create_widget_object(ttk.Label(exam_setup_frame, text="Select the images\n to display:"),
+                                  col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=cc)
+
+        # Define the variables to store the selections
+        self.show_visualization_variables = {SHOW_ORIGINAL: IntVar(value=0),
+                                             SHOW_CROPPED: IntVar(value=0),
+                                             SHOW_FOREGROUND: IntVar(value=0)}
+
+        # Define the widgets
+        cc = create_widget_object(ttk.Checkbutton(exam_setup_frame, text='Original',
+                                                  variable=self.show_visualization_variables[SHOW_ORIGINAL],
+                                                  command=lambda visualization=SHOW_ORIGINAL:
+                                                  self.visualization_check_button_callback(
+                                                      visualization=visualization)),
+                                  col_num=L_MIDDLE_COLUMN, row_num=cc)
+        cc = create_widget_object(ttk.Checkbutton(exam_setup_frame, text='Cropped',
+                                                  variable=self.show_visualization_variables[SHOW_CROPPED],
+                                                  command=lambda visualization=SHOW_CROPPED:
+                                                  self.visualization_check_button_callback(
+                                                      visualization=visualization)),
+                                  col_num=R_MIDDLE_COLUMN, row_num=cc)
+        cc = create_widget_object(ttk.Checkbutton(exam_setup_frame, text='Region of\nInterest',
+                                                  variable=self.show_visualization_variables[SHOW_FOREGROUND],
+                                                  command=lambda visualization=SHOW_FOREGROUND:
+                                                  self.visualization_check_button_callback(
+                                                      visualization=visualization)),
+                                  col_num=RIGHT_COLUMN, row_num=cc, increment_row=True)
+
         # endregion
 
         # Define the widgets used to populate the thyroid exam frame
@@ -625,7 +734,8 @@ class UserInterface(BasicNode):
         self.registered_data_save_location_button = \
             ttk.Button(thyroid_exam_frame, text='Select Location to Save Exam Data',
                        command=self.registered_data_save_location_button_callback)
-        dd = create_widget_object(self.registered_data_save_location_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+        dd = create_widget_object(self.registered_data_save_location_button, col_num=LEFT_COLUMN,
+                                  col_span=FULL_WIDTH,
                                   row_num=dd, increment_row=True)
 
         # Define a separator
@@ -645,13 +755,34 @@ class UserInterface(BasicNode):
         # Define a separator
         dd = create_horizontal_separator(thyroid_exam_frame, dd)
 
+        # Define the image spacing selector
+        self.image_spacing_variable = IntVar(value=10)
+        dd = create_widget_object(ttk.Label(thyroid_exam_frame, text="Image Spacing:"), col_num=LEFT_COLUMN,
+                                  col_span=TWO_COLUMN, row_num=dd)
+        dd = create_widget_object(Radiobutton(thyroid_exam_frame, text="2.0mm",
+                                              variable=self.image_spacing_variable,
+                                              value=20, anchor=CENTER, justify=CENTER,
+                                              command=self.image_spacing_selection_callback),
+                                  col_num=L_MIDDLE_COLUMN, row_num=dd)
+        dd = create_widget_object(Radiobutton(thyroid_exam_frame, text="1.0mm",
+                                              variable=self.image_spacing_variable,
+                                              value=10, anchor=CENTER, justify=CENTER,
+                                              command=self.image_spacing_selection_callback),
+                                  col_num=LR_MIDDLE_COLUMN, col_span=TWO_COLUMN, row_num=dd)
+        dd = create_widget_object(Radiobutton(thyroid_exam_frame, text="0.5mm",
+                                              variable=self.image_spacing_variable,
+                                              value=5, anchor=CENTER, justify=CENTER,
+                                              command=self.image_spacing_selection_callback),
+                                  col_num=R_MIDDLE_COLUMN, row_num=dd, increment_row=True)
+
         # Define the scan label
         dd = create_widget_object(
-            ttk.Label(thyroid_exam_frame, text="Scanning Distance", anchor=CENTER, justify=CENTER),
+            ttk.Label(thyroid_exam_frame, text="Scanning Distance"),
             col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=dd)
 
         # Define the scan distance entry field
-        self.scan_distance_entry = Entry(thyroid_exam_frame, validate=ALL, validatecommand=(validation_command, '%P'),
+        self.scan_distance_entry = Entry(thyroid_exam_frame, validate=ALL,
+                                         validatecommand=(validation_command, '%P'),
                                          justify=CENTER, width=5)
         self.scan_distance_entry.insert(0, '6.0')
         dd = create_widget_object(self.scan_distance_entry, col_num=L_MIDDLE_COLUMN, row_num=dd)
@@ -711,9 +842,10 @@ class UserInterface(BasicNode):
 
         # Define volume data save location label
         self.volume_data_save_location_str_var = StringVar(thyroid_exam_frame, '')
-        dd = create_widget_object(ttk.Label(thyroid_exam_frame, textvariable=self.volume_data_save_location_str_var),
-                                  col_num=L_MIDDLE_COLUMN, col_span=FULL_WIDTH - TWO_COLUMN,
-                                  row_num=dd, increment_row=True)
+        dd = create_widget_object(
+            ttk.Label(thyroid_exam_frame, textvariable=self.volume_data_save_location_str_var),
+            col_num=L_MIDDLE_COLUMN, col_span=FULL_WIDTH - TWO_COLUMN,
+            row_num=dd, increment_row=True)
 
         # Define generate volume button
         self.generate_new_volume_button = ttk.Button(thyroid_exam_frame, text='Generate New Volume',
@@ -741,9 +873,10 @@ class UserInterface(BasicNode):
 
         # Define volume data load location label
         self.volume_data_load_location_str_var = StringVar(thyroid_exam_frame, '')
-        dd = create_widget_object(ttk.Label(thyroid_exam_frame, textvariable=self.volume_data_load_location_str_var),
-                                  col_num=L_MIDDLE_COLUMN, col_span=FULL_WIDTH - TWO_COLUMN,
-                                  row_num=dd, increment_row=True)
+        dd = create_widget_object(
+            ttk.Label(thyroid_exam_frame, textvariable=self.volume_data_load_location_str_var),
+            col_num=L_MIDDLE_COLUMN, col_span=FULL_WIDTH - TWO_COLUMN,
+            row_num=dd, increment_row=True)
 
         # Define display volume button
         self.display_loaded_volume_button = ttk.Button(thyroid_exam_frame, text='Display Loaded Volume',
@@ -787,7 +920,7 @@ class UserInterface(BasicNode):
 
         # endregion
 
-        # List the widgets used to populate the developer window
+        # Define the widgets used to populate the developer window
         # region
 
         # Define the row counter
@@ -903,35 +1036,125 @@ class UserInterface(BasicNode):
         # Define save images button
         self.save_images_button = ttk.Button(developer_frame, text=START_SAVING_IMAGES,
                                              command=self.send_image_saving_command_callback)
-        ff = create_widget_object(self.save_images_button, col_num=RL_MIDDLE_COLUMN, col_span=FOUR_COLUMN, row_num=ff,
+        ff = create_widget_object(self.save_images_button, col_num=RL_MIDDLE_COLUMN, col_span=FOUR_COLUMN,
+                                  row_num=ff,
                                   increment_row=True)
 
-        # Define overall speed label
-        ff = create_widget_object(ttk.Label(developer_frame, text="Select the overall speed\nfactor for the robot."),
-                                  col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=ff, row_span=DOUBLE_ROW)
+        ff = create_horizontal_separator(developer_frame, ff)
 
-        # Define speed selector variable
-        self.speed_selector = IntVar(value=100)
+        # Define the image selection label
+        ff = create_widget_object(ttk.Label(developer_frame, text="Select the images\n to display:"),
+                                  col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=ff)
 
-        # Define speed options
-        ff = create_widget_object(Radiobutton(developer_frame, text="10%", variable=self.speed_selector,
-                                              value=10, command=self.speed_selector_callback),
+        # Define the variables to store the selections
+        self.show_visualization_variables.update({
+            SHOW_RECOLOR: IntVar(value=0),
+            SHOW_BLUR: IntVar(value=0),
+            SHOW_CENTROIDS_ONLY: IntVar(value=0),
+            SHOW_CENTROIDS_CROSS_ONLY: IntVar(value=0),
+            SHOW_MASK_CENTROIDS_CROSS_OVERLAY: IntVar(value=0),
+            SHOW_SKIN_APPROXIMATION: IntVar(value=0)
+        })
+
+        # Define the widgets
+        ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Recolored',
+                                                  variable=self.show_visualization_variables[SHOW_RECOLOR],
+                                                  command=lambda visualization=SHOW_RECOLOR:
+                                                  self.visualization_check_button_callback(
+                                                      visualization=visualization)),
                                   col_num=L_MIDDLE_COLUMN, row_num=ff)
-        ff = create_widget_object(Radiobutton(developer_frame, text="25%", variable=self.speed_selector,
-                                              value=25, command=self.speed_selector_callback),
+        ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Pre-processed',
+                                                  variable=self.show_visualization_variables[SHOW_BLUR],
+                                                  command=lambda visualization=SHOW_BLUR:
+                                                  self.visualization_check_button_callback(
+                                                      visualization=visualization)),
                                   col_num=MIDDLE_COLUMN, row_num=ff)
-        ff = create_widget_object(Radiobutton(developer_frame, text="50%", variable=self.speed_selector,
-                                              value=50, command=self.speed_selector_callback),
-                                  col_num=R_MIDDLE_COLUMN, row_num=ff, increment_row=True)
-        ff = create_widget_object(Radiobutton(developer_frame, text="75%", variable=self.speed_selector,
-                                              value=75, command=self.speed_selector_callback),
-                                  col_num=L_MIDDLE_COLUMN, row_num=ff)
-        ff = create_widget_object(Radiobutton(developer_frame, text="125%", variable=self.speed_selector,
-                                              value=125, command=self.speed_selector_callback),
+        ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Centroids',
+                                                  variable=self.show_visualization_variables[SHOW_CENTROIDS_ONLY],
+                                                  command=lambda visualization=SHOW_CENTROIDS_ONLY:
+                                                  self.visualization_check_button_callback(
+                                                      visualization=visualization)),
                                   col_num=R_MIDDLE_COLUMN, row_num=ff)
-        ff = create_widget_object(Radiobutton(developer_frame, text="100%", variable=self.speed_selector,
-                                              value=100, command=self.speed_selector_callback),
+        ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Centroids\n & Cross',
+                                                  variable=self.show_visualization_variables[
+                                                      SHOW_CENTROIDS_CROSS_ONLY],
+                                                  command=lambda visualization=SHOW_CENTROIDS_CROSS_ONLY:
+                                                  self.visualization_check_button_callback(
+                                                      visualization=visualization)),
+                                  col_num=RIGHT_COLUMN, row_num=ff, increment_row=True)
+        ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Mask, Centroids,\n & Cross',
+                                                  variable=self.show_visualization_variables[
+                                                      SHOW_MASK_CENTROIDS_CROSS_OVERLAY],
+                                                  command=lambda visualization=SHOW_MASK_CENTROIDS_CROSS_OVERLAY:
+                                                  self.visualization_check_button_callback(
+                                                      visualization=visualization)),
+                                  col_num=L_MIDDLE_COLUMN, row_num=ff)
+        ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Balance Line',
+                                                  variable=self.show_visualization_variables[
+                                                      SHOW_SKIN_APPROXIMATION],
+                                                  command=lambda visualization=SHOW_SKIN_APPROXIMATION:
+                                                  self.visualization_check_button_callback(
+                                                      visualization=visualization)),
                                   col_num=MIDDLE_COLUMN, row_num=ff, increment_row=True)
+
+        ff = create_horizontal_separator(developer_frame, ff)
+
+        # Define the mask selection label
+        ff = create_widget_object(ttk.Label(developer_frame, text="Select the masks\n to display:"),
+                                  col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=ff)
+
+        # Define the selection variables
+        self.show_result_mask_variable = IntVar(value=0)
+        self.show_post_processed_mask_variable = IntVar(value=0)
+        self.show_sure_foreground_mask_variable = IntVar(value=0)
+        self.show_sure_background_mask_variable = IntVar(value=0)
+        self.show_probable_foreground_mask_variable = IntVar(value=0)
+        self.show_initialization_mask_variable = IntVar(value=0)
+        self.show_grabcut_user_initialization_0_mask_variable = IntVar(value=0)
+
+        # Define the widgets
+        ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Result',
+                                                  variable=self.show_result_mask_variable,
+                                                  command=lambda visualization=SHOW_MASK:
+                                                  self.visualization_check_button_callback(
+                                                      visualization=visualization)),
+                                  col_num=L_MIDDLE_COLUMN, row_num=ff)
+        ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Post-processed',
+                                                  variable=self.show_post_processed_mask_variable,
+                                                  command=lambda visualization=SHOW_POST_PROCESSED_MASK:
+                                                  self.visualization_check_button_callback(
+                                                      visualization=visualization)),
+                                  col_num=MIDDLE_COLUMN, row_num=ff)
+        ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Sure-\nforeground',
+                                                  variable=self.show_sure_foreground_mask_variable,
+                                                  command=lambda visualization=SHOW_SURE_FOREGROUND:
+                                                  self.visualization_check_button_callback(
+                                                      visualization=visualization)),
+                                  col_num=R_MIDDLE_COLUMN, row_num=ff)
+        ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Sure-\nbackground',
+                                                  variable=self.show_sure_background_mask_variable,
+                                                  command=lambda visualization=SHOW_SURE_BACKGROUND:
+                                                  self.visualization_check_button_callback(
+                                                      visualization=visualization)),
+                                  col_num=RIGHT_COLUMN, row_num=ff, increment_row=True)
+        ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Probable-\nforeground',
+                                                  variable=self.show_probable_foreground_mask_variable,
+                                                  command=lambda visualization=SHOW_PROBABLE_FOREGROUND:
+                                                  self.visualization_check_button_callback(
+                                                      visualization=visualization)),
+                                  col_num=L_MIDDLE_COLUMN, row_num=ff)
+        ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Initialization',
+                                                  variable=self.show_initialization_mask_variable,
+                                                  command=lambda visualization=SHOW_INITIALIZED_MASK:
+                                                  self.visualization_check_button_callback(
+                                                      visualization=visualization)),
+                                  col_num=MIDDLE_COLUMN, row_num=ff)
+        ff = create_widget_object(ttk.Checkbutton(developer_frame, text='User Initialization',
+                                                  variable=self.show_grabcut_user_initialization_0_mask_variable,
+                                                  command=lambda visualization=SHOW_GRABCUT_USER_INITIALIZATION_0:
+                                                  self.visualization_check_button_callback(
+                                                      visualization=visualization)),
+                                  col_num=R_MIDDLE_COLUMN, row_num=ff, increment_row=True)
         # endregion
 
         # Define the widgets used to populate the experimentation window
@@ -954,8 +1177,9 @@ class UserInterface(BasicNode):
                                   col_span=TWO_COLUMN, row_num=gg)
 
         # Define the image data stream location variable
-        self.image_data_stream_location_str_var = StringVar(experimentation_frame, '/home/ben/thyroid_ultrasound_data/'
-                                                                                   'testing_and_validation/raw_images')
+        self.image_data_stream_location_str_var = StringVar(experimentation_frame,
+                                                            '/home/ben/thyroid_ultrasound_data/'
+                                                            'testing_and_validation/raw_images')
         gg = create_widget_object(ttk.Label(experimentation_frame,
                                             textvariable=self.image_data_stream_location_str_var),
                                   col_num=L_MIDDLE_COLUMN, col_span=FULL_WIDTH - TWO_COLUMN,
@@ -1000,7 +1224,8 @@ class UserInterface(BasicNode):
             ttk.Button(experimentation_frame,
                        text=START_SENDING_IMAGE_BALANCED_OVERRIDE_VALUE,
                        command=self.send_image_balanced_override_button_callback)
-        gg = create_widget_object(self.send_image_balanced_override_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+        gg = create_widget_object(self.send_image_balanced_override_button, col_num=LEFT_COLUMN,
+                                  col_span=FULL_WIDTH,
                                   row_num=gg, increment_row=True)
 
         # Define image centered override button
@@ -1009,7 +1234,8 @@ class UserInterface(BasicNode):
             ttk.Button(experimentation_frame,
                        text=START_SENDING_IMAGE_CENTERED_OVERRIDE_VALUE,
                        command=self.send_image_centered_override_button_callback)
-        gg = create_widget_object(self.send_image_centered_override_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+        gg = create_widget_object(self.send_image_centered_override_button, col_num=LEFT_COLUMN,
+                                  col_span=FULL_WIDTH,
                                   row_num=gg, increment_row=True)
 
         # Define registered data button
@@ -1018,7 +1244,8 @@ class UserInterface(BasicNode):
             ttk.Button(experimentation_frame,
                        text=START_SENDING_REGISTERED_DATA_OVERRIDE_VALUE,
                        command=self.send_registered_data_override_button_callback)
-        gg = create_widget_object(self.send_registered_data_override_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+        gg = create_widget_object(self.send_registered_data_override_button, col_num=LEFT_COLUMN,
+                                  col_span=FULL_WIDTH,
                                   row_num=gg, increment_row=True)
 
         # Define not in contact option
@@ -1075,14 +1302,16 @@ class UserInterface(BasicNode):
                                                          variable=self.save_raw_image_variable)
         gg = create_widget_object(self.save_raw_image_yes_button, col_num=MIDDLE_COLUMN, row_num=gg, sticky="")
 
-        self.save_image_data_objects_yes_button = ttk.Radiobutton(experimentation_frame, text="Yes", value=YES_BUTTON,
+        self.save_image_data_objects_yes_button = ttk.Radiobutton(experimentation_frame, text="Yes",
+                                                                  value=YES_BUTTON,
                                                                   variable=self.save_image_data_objects_variable)
         gg = create_widget_object(self.save_image_data_objects_yes_button, col_num=RL_MIDDLE_COLUMN, row_num=gg,
                                   sticky="")
 
         self.save_image_centroid_yes_button = ttk.Radiobutton(experimentation_frame, text="Yes", value=YES_BUTTON,
                                                               variable=self.save_image_centroid_variable)
-        gg = create_widget_object(self.save_image_centroid_yes_button, col_num=R_MIDDLE_COLUMN, row_num=gg, sticky="")
+        gg = create_widget_object(self.save_image_centroid_yes_button, col_num=R_MIDDLE_COLUMN, row_num=gg,
+                                  sticky="")
 
         self.save_skin_error_yes_button = ttk.Radiobutton(experimentation_frame, text="Yes", value=YES_BUTTON,
                                                           variable=self.save_skin_error_variable)
@@ -1109,7 +1338,8 @@ class UserInterface(BasicNode):
 
         self.save_image_centroid_no_button = ttk.Radiobutton(experimentation_frame, text="No", value=NO_BUTTON,
                                                              variable=self.save_image_centroid_variable)
-        gg = create_widget_object(self.save_image_centroid_no_button, col_num=R_MIDDLE_COLUMN, row_num=gg, sticky="")
+        gg = create_widget_object(self.save_image_centroid_no_button, col_num=R_MIDDLE_COLUMN, row_num=gg,
+                                  sticky="")
 
         self.save_skin_error_no_button = ttk.Radiobutton(experimentation_frame, text="No", value=NO_BUTTON,
                                                          variable=self.save_skin_error_variable)
@@ -1159,6 +1389,23 @@ class UserInterface(BasicNode):
     ############################################################################
     # Define GUI button callbacks
     # region
+
+    def manual_controls_status_button_callback(self):
+        if self.manual_controls_status_button[WIDGET_TEXT] == ACTIVATE_MANUAL_CONTROLS:
+            new_state = NORMAL
+            new_text = DEACTIVATE_MANUAL_CONTROLS
+        elif self.manual_controls_status_button[WIDGET_TEXT] == DEACTIVATE_MANUAL_CONTROLS:
+            new_state = DISABLED
+            new_text = ACTIVATE_MANUAL_CONTROLS
+        else:
+            raise ValueError('Widget text was not recognized.')
+        widgets_in_robot_controls = [self.positive_x_movement_button, self.negative_x_movement_button,
+                                     self.positive_y_movement_button, self.negative_y_movement_button,
+                                     self.positive_pitch_movement_button, self.negative_pitch_movement_button,
+                                     self.positive_yaw_movement_button, self.negative_yaw_movement_button]
+        for widget in widgets_in_robot_controls:
+            widget[WIDGET_STATE] = new_state
+        self.manual_controls_status_button[WIDGET_TEXT] = new_text
 
     def robot_control_button_callback(self, axis_and_direction: str):
 
@@ -1289,6 +1536,9 @@ class UserInterface(BasicNode):
         Publish the command to generate the grabcut filter mask
         """
         self.identify_thyroid_from_points_command_service(True)
+
+    def image_spacing_selection_callback(self):
+        self.image_spacing_selection_service(self.image_spacing_variable.get() / 10000)
 
     def scan_positive_button_callback(self) -> None:
         """
@@ -1656,7 +1906,7 @@ class UserInterface(BasicNode):
         """
         Publish the speed selected on the interface.
         """
-        self.speed_selector_service(self.speed_selector.get() / 100)
+        self.speed_selector_service(self.speed_selector_variable.get() / 100)
 
     def pid_value_setting_callback(self) -> None:
         """
@@ -1735,7 +1985,8 @@ class UserInterface(BasicNode):
             self.tm_override_force_control_service(False)
             self.send_force_control_override_button[WIDGET_TEXT] = START_SENDING_FORCE_CONTROL_OVERRIDE_VALUE
         else:
-            raise Exception(self.send_force_control_override_button[WIDGET_TEXT] + " is not a recognized button text.")
+            raise Exception(
+                self.send_force_control_override_button[WIDGET_TEXT] + " is not a recognized button text.")
 
     def send_registered_data_override_button_callback(self) -> None:
         if self.send_registered_data_override_button[WIDGET_TEXT] == START_SENDING_REGISTERED_DATA_OVERRIDE_VALUE:
@@ -1840,6 +2091,17 @@ class UserInterface(BasicNode):
         else:
             raise Exception("Button text was not recognized.")
 
+    def visualization_check_button_callback(self, visualization: int):
+        if visualization in self.show_visualization_variables.keys():
+            if visualization in self.show_visualization_services.keys():
+                self.show_visualization_services[visualization](visualization,
+                                                                bool(self.show_visualization_variables[
+                                                                         visualization].get()))
+            else:
+                raise Exception(str(visualization) + ' is not a recognized visualization service.')
+        else:
+            raise Exception(str(visualization) + ' is not a recognized visualization variable.')
+
     # endregion
     ############################################################################
 
@@ -1916,7 +2178,9 @@ class UserInterface(BasicNode):
         """
         Publishes the different commands at regular intervals.
         """
-        self.image_centering_side_publisher.publish(Int8(self.image_centering_side_variable.get()))
+        if self.previous_image_centering_side_variable_value != self.image_centering_side_variable.get():
+            self.previous_image_centering_side_variable_value = self.image_centering_side_variable.get()
+            self.image_centering_side_publisher.publish(Int8(self.image_centering_side_variable.get()))
         new_msg = TwistStamped()
         new_msg.header.stamp = Time.now()
         if self.manual_control_velocity_message is not None:

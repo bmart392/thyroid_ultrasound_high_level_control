@@ -206,6 +206,7 @@ class UserInterface(BasicNode):
             self.image_streaming_command_service = ServiceProxy(CS_IMAGE_STREAMING_CONTROL, BoolRequest)
             self.restart_image_streaming_command_service = ServiceProxy(CS_IMAGE_STREAMING_RESTART, BoolRequest)
             self.reverse_stream_order_service = ServiceProxy(CS_IMAGE_STREAMING_REVERSE_PLAYBACK_DIRECTION, BoolRequest)
+            self.image_streaming_frequency_service = ServiceProxy(CS_IMAGE_STREAMING_SET_FREQUENCY, Float64Request)
 
         # Define the image based user input node service proxies
         self.generate_new_image_cropping_command_service = ServiceProxy(IB_UI_CROP_IMAGE_FROM_POINTS, BoolRequest)
@@ -213,6 +214,9 @@ class UserInterface(BasicNode):
                                                                          BoolRequest)
         self.identify_thyroid_from_points_command_service = ServiceProxy(IB_UI_IDENTIFY_THYROID_FROM_POINTS,
                                                                          BoolRequest)
+
+        # Define the image position registration service proxies
+        self.register_new_data_service = ServiceProxy(IPR_REGISTER_NEW_DATA, BoolRequest)
 
         # Define the non-real-time segmentation node service proxies
         self.nrts_registered_data_load_location_service = ServiceProxy(NRTS_REGISTERED_DATA_LOAD_LOCATION,
@@ -227,7 +231,7 @@ class UserInterface(BasicNode):
         self.volume_data_save_location_service = ServiceProxy(VG_VOLUME_DATA_SAVE_LOCATION, StringRequest)
         self.volume_data_load_location_service = ServiceProxy(VG_VOLUME_DATA_LOAD_LOCATION, StringRequest)
 
-        # Define the volume generation node service proxies
+        # Define the visualization node service proxies
         self.show_visualization_services = {}
         for visualization_name, service_name in zip([SHOW_ORIGINAL, SHOW_CROPPED, SHOW_RECOLOR, SHOW_BLUR, SHOW_MASK,
                                                      SHOW_POST_PROCESSED_MASK, SHOW_SURE_FOREGROUND,
@@ -1007,7 +1011,7 @@ class UserInterface(BasicNode):
         self.i_gain_entry = ttk.Entry(developer_frame, validate=ALL, validatecommand=(validation_command, '%P'),
                                       justify=CENTER, width=5)
         self.i_gain_entry.insert(0, "0.000")
-        create_widget_object(self.i_gain_entry, col_num=MIDDLE_COLUMN, row_num=ff)
+        ff = create_widget_object(self.i_gain_entry, col_num=MIDDLE_COLUMN, row_num=ff)
 
         # Define d gain entry field
         self.d_gain_entry = ttk.Entry(developer_frame, validate=ALL, validatecommand=(validation_command, '%P'),
@@ -1191,6 +1195,29 @@ class UserInterface(BasicNode):
                                                       command=self.reverse_stream_order_button_callback,
                                                       state=DISABLED)
         gg = create_widget_object(self.reverse_stream_order_button,
+                                  col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                  row_num=gg, increment_row=True)
+
+        # Define the publishing rate entry field
+        gg = create_widget_object(ttk.Label(experimentation_frame,
+                                            text='Publishing rate:'),
+                                  col_num=LEFT_COLUMN, row_num=gg)
+        self.stream_data_rate_entry = ttk.Entry(experimentation_frame, validate=ALL,
+                                                validatecommand=(validation_command, '%P'),
+                                                justify=CENTER, width=5)
+        self.stream_data_rate_entry.insert(0, "20.0")
+        gg = create_widget_object(self.stream_data_rate_entry, col_num=L_MIDDLE_COLUMN, row_num=gg)
+        gg = create_widget_object(ttk.Label(experimentation_frame, text='Hz'), col_num=LR_MIDDLE_COLUMN, row_num=gg)
+        gg = create_widget_object(ttk.Button(experimentation_frame, text='Send',
+                                             command=self.set_new_streaming_frequency_callback),
+                                  col_num=MIDDLE_COLUMN, row_num=gg, increment_row=True)
+
+        gg = create_horizontal_separator(experimentation_frame, gg)
+
+        # Define the request image registration button
+        gg = create_widget_object(ttk.Button(experimentation_frame,
+                                             text="Request Data to be Registered",
+                                             command=self.register_new_data_callback),
                                   col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
                                   row_num=gg, increment_row=True)
 
@@ -1958,6 +1985,12 @@ class UserInterface(BasicNode):
             self.reverse_stream_order_button[WIDGET_TEXT] = PLAYBACK_STREAM_IN_REVERSE_CHRONOLOGICAL_ORDER
         else:
             raise Exception("Button text was not recognized")
+
+    def set_new_streaming_frequency_callback(self) -> None:
+        self.image_streaming_frequency_service(float(self.stream_data_rate_entry.get()))
+
+    def register_new_data_callback(self) -> None:
+        self.register_new_data_service(True)
 
     def send_patient_contact_override_button_callback(self) -> None:
         if self.send_patient_contact_override_button[WIDGET_TEXT] == START_SENDING_PATIENT_CONTACT_OVERRIDE_VALUE:

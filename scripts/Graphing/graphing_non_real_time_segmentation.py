@@ -5,10 +5,10 @@ Contains the code for validating that the ImageBasedUserInput ui_node is success
 # Import standard python packages
 from numpy import save, load, append
 from imageio.v3 import imwrite
-from csv import DictWriter, DictReader
+from csv import DictWriter
 from numpy.polynomial import Polynomial
 from statistics import mean, median, stdev
-from matplotlib.pyplot import subplots, savefig, rc, show
+from matplotlib.pyplot import subplots,  rc, show
 from os.path import isdir
 from os import mkdir
 from cv2 import imshow, waitKey, imread, resize, INTER_CUBIC
@@ -18,7 +18,7 @@ from cv2 import imshow, waitKey, imread, resize, INTER_CUBIC
 # Import custom python packages
 from thyroid_ultrasound_imaging_support.RegisteredData.load_folder_of_saved_registered_data import \
     load_folder_of_saved_registered_data
-from thyroid_ultrasound_imaging_support.RegisteredData.generate_ordered_list_of_directory_contents import \
+from thyroid_ultrasound_support.Functions.generate_ordered_list_of_directory_contents import \
     generate_ordered_list_of_directory_contents
 from thyroid_ultrasound_imaging_support.UserInput.user_input_polygon_points import user_input_polygon_points
 from thyroid_ultrasound_imaging_support.Boundaries.create_convex_triangles_from_points import \
@@ -26,7 +26,7 @@ from thyroid_ultrasound_imaging_support.Boundaries.create_convex_triangles_from_
 from thyroid_ultrasound_imaging_support.Boundaries.create_mask_array_from_triangles import \
     create_mask_array_from_triangles
 from thyroid_ultrasound_imaging_support.Validation.calculate_dice_score import calculate_dice_score
-from Graphing.read_recorded_data_csv import read_recorded_data_csv, CONTROLLED, UNCONTROLLED, FIG_WIDTH, FIG_HEIGHT
+from Graphing.read_recorded_data_csv import read_recorded_data_csv,   FIG_WIDTH, FIG_HEIGHT
 from thyroid_ultrasound_imaging_support.Visualization.create_mask_overlay_array import create_mask_overlay_array, \
     COLORIZED
 

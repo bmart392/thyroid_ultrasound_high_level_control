@@ -4,8 +4,6 @@
 File containing ControllerTuningGraphsNode class.
 """
 
-# TODO - High - Add a subscriber to listen for the current image setpoint
-
 # Import standard ROS packages
 from geometry_msgs.msg import WrenchStamped, TwistStamped
 from armer_msgs.msg import ManipulatorState
@@ -21,7 +19,6 @@ from thyroid_ultrasound_messages.msg import Float64Stamped
 
 # Import custom python packages
 from thyroid_ultrasound_support.BasicNode import *
-from thyroid_ultrasound_support.TopicNames import *
 from thyroid_ultrasound_robot_control_support.Helpers.calc_rpy import calc_rpy
 from thyroid_ultrasound_robot_control_support.Helpers.convert_pose_to_transform_matrix import \
     convert_pose_to_transform_matrix

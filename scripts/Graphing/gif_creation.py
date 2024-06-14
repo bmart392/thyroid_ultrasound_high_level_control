@@ -1,7 +1,6 @@
 import imageio.v3 as iio
-from pygifsicle import optimize
 
-from thyroid_ultrasound_imaging_support.RegisteredData.generate_ordered_list_of_directory_contents import \
+from thyroid_ultrasound_support.Functions.generate_ordered_list_of_directory_contents import \
     generate_ordered_list_of_directory_contents
 
 RESULT_FOLDER: str = '/home/ben/Documents/Thesis/Visuals'

@@ -6,33 +6,31 @@ File containing the ExperimentDataRecorder class.
 
 # TODO - Dream - Add proper logging through BasicNode class
 # TODO - Dream - Add proper error catching with exceptions
-# TODO - High - Test that it is recorded when a waypoint is reached
 
 # Import standard packages
 from os import mkdir
 from os.path import isdir
-
 from cv2 import cvtColor, COLOR_GRAY2BGR
 from matplotlib.image import imsave
-from numpy import array
 from csv import DictWriter
 
 # Import standard ROS packages
 from geometry_msgs.msg import WrenchStamped, TwistStamped
-from thyroid_ultrasound_imaging_support.ImageData.convert_image_message_to_array import convert_image_message_to_array
-from thyroid_ultrasound_robot_control_support.Helpers.calc_rpy import calc_rpy
-from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 from armer_msgs.msg import ManipulatorState
+
+# Import custom python packages
+from thyroid_ultrasound_support.Functions.date_stamp_str import date_stamp_str
+from thyroid_ultrasound_support.MessageConversion.convert_image_message_to_array import convert_image_message_to_array
+from thyroid_ultrasound_imaging_support.ImageData.ImageData import ImageData
+from thyroid_ultrasound_robot_control_support.Helpers.calc_rpy import calc_rpy
 from thyroid_ultrasound_robot_control_support.Helpers.convert_pose_to_transform_matrix import \
     convert_pose_to_transform_matrix
 
 # Import custom ROS packages
 from thyroid_ultrasound_support.BasicNode import *
-from thyroid_ultrasound_messages.msg import SaveExperimentDataCommand, Float64MultiArrayStamped, image_data_message, \
+from thyroid_ultrasound_messages.msg import SaveExperimentDataCommand, image_data_message, \
     Float64Stamped
-from thyroid_ultrasound_imaging_support.Validation.date_stamp_str import date_stamp_str
-from thyroid_ultrasound_imaging_support.ImageData.ImageData import ImageData
 
 # Define constants to use when writing data to CSV files
 MESSAGE_ID: str = 'Message ID Number'

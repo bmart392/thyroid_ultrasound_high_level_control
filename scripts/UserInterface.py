@@ -14,6 +14,8 @@ from tkinter.filedialog import askdirectory
 import tkinter.ttk as ttk
 from argparse import ArgumentParser
 from os.path import isdir
+from copy import copy
+from datetime import datetime
 
 # Import ROS packages
 from geometry_msgs.msg import WrenchStamped, TwistStamped, Twist
@@ -21,6 +23,7 @@ from std_msgs.msg import Int8
 
 # Import custom python packages
 from thyroid_ultrasound_imaging_support.Visualization.VisualizationConstants import *
+from thyroid_ultrasound_support.Constants.SharedConstants import REST_PHASE, GROWTH_PHASE
 
 # Import custom ROS packages
 from thyroid_ultrasound_support.BasicNode import *
@@ -73,6 +76,8 @@ START_PUBLISHING_CONTROLLER_STATUS_VALUES: str = "Start publishing controller st
 STOP_PUBLISHING_CONTROLLER_STATUS_VALUES: str = "Stop publishing controller status values."
 ACTIVATE_MANUAL_CONTROLS: str = "Activate\nManual Controls"
 DEACTIVATE_MANUAL_CONTROLS: str = "Deactivate\nManual Controls"
+SET_TO_REST_PHASE: str = 'Set to Rest Phase'
+SET_TO_GROWTH_PHASE: str = 'Set to Growth Phase'
 
 # Define constants for parameters of widgets
 WIDGET_TEXT: str = 'text'
@@ -106,6 +111,9 @@ GRAPHICS_WINDOW: int = int(3)
 # Define empty status string
 EMPTY_STATUS: str = "STATUS: "
 
+# Define the maximum number of status messages to save
+MAXIMUM_STATUS_MESSAGES: int = int(50)
+
 # Define function mode constants
 TESTING: int = int(0)
 RUNNING: int = int(1)
@@ -137,6 +145,9 @@ class UserInterface(BasicNode):
         # Add a call to the parent class
         super().__init__()
 
+        # Startup the node
+        init_node(USER_INTERFACE)
+
         # Added to ensure TKinter works in the ROS framework
         self.parent = parent
 
@@ -152,21 +163,153 @@ class UserInterface(BasicNode):
         # Parse the arguments passed to the code
         passed_arguments = parser.parse_args()
 
+        # --------------------------------------------
+        # Define the known list of nodes in the system
+        # region
+
+        # Create a variable for all the expected node names
+        self.node_names_all = list(CORE_NAMES)
+
+        # Add the correct nodes based on the arguments passed
+        if passed_arguments.testing_mode:
+            self.node_names_all.insert(0, CLARIUS_US_SPOOF)
+        else:
+            self.node_names_all.insert(0, CLARIUS_US_PUBLISHER)
+        if passed_arguments.testing_mode or passed_arguments.experimentation_mode:
+            self.node_names_all.append(CONTROLLER_TUNING_GRAPHS)
+        if passed_arguments.experimentation_mode:
+            self.node_names_all.append(EXPERIMENT_DATA_RECORDER)
+
+        # endregion
+        # --------------------------------------------
+
+        # -------------------------------------
+        # Define the basic structure of the GUI
+        # region
+
+        # Define parameters used in the logic of the GUI
+        self.currently_using_image_control = False
+        self.currently_using_force_feedback = False
+        self.currently_using_pose_feedback = False
+        self.currently_using_balancing_feedback = False
+
+        # Define a variable to hold the velocity to publish for the manual control
+        self.manual_control_velocity_message = None
+
+        # Set the title of the window
+        self.parent.title("User Interface")
+
+        # Define the frame in which all objects will be created
+        main_content_frame = Frame(parent)
+
+        # Define a frame to hold the always visible control buttons
+        button_controls_frame = Frame(main_content_frame)
+
+        # Define a frame to hold the robot control buttons
+        robot_controls_frame = Frame(main_content_frame)
+
+        # Define a notebook to manage the tabs within the GUI
+        tab_controller = ttk.Notebook(main_content_frame)
+
+        # Define the frames that will be used in the tabs
+        exam_setup_frame = ttk.Frame(tab_controller)
+        thyroid_exam_frame = ttk.Frame(tab_controller)
+        # nodule_exam_frame = ttk.Frame(tab_controller)
+        status_logging_frame = ttk.Frame(tab_controller)
+        developer_frame = ttk.Frame(tab_controller)
+        experimentation_frame = ttk.Frame(tab_controller)
+
+        # Add the frames to the tab controller
+        tab_controller.add(exam_setup_frame, text="Exam Setup")
+        tab_controller.add(thyroid_exam_frame, text="Thyroid Exam")
+        # tab_controller.add(nodule_exam_frame, text="Nodule Exam")
+        tab_controller.add(status_logging_frame, text="Status Logger")
+        if passed_arguments.experimentation_mode:
+            tab_controller.add(developer_frame, text="Developer")
+        if passed_arguments.experimentation_mode:
+            tab_controller.add(experimentation_frame, text="Experimentation")
+
+        # endregion
+        # -------------------------------------
+
+        # ----------------------------------------
+        # Define the logging components of the GUI
+        # region
+
+        # Define row counter
+        ee = 0
+
+        # Define a dictionary in which to store the current status message variables
+        self.current_status_messages = {}
+
+        # Define a dictionary in which to store the time of the most recent message
+        self.current_status_times = {}
+
+        # Define a dictionary in which to store the status message history for each node
+        self.status_log_dict = {}
+
+        # Define a variable for storing which node status to show
+        self.selected_node = StringVar()
+
+        # For each known node,
+        for node_name in self.node_names_all:
+            # Add the node to the status dictionaries
+            self.current_status_messages.update({node_name: StringVar()})
+            self.current_status_times.update({node_name: StringVar()})
+            self.status_log_dict.update({node_name: []})
+
+            # Create a label for the node
+            ee = create_widget_object(ttk.Label(status_logging_frame, text=node_name + ':'),
+                                      col_num=MIDDLE_COLUMN, row_num=ee)
+
+            # Create a current status label for the node
+            ee = create_widget_object(ttk.Label(status_logging_frame,
+                                                textvariable=self.current_status_times[node_name]),
+                                      col_num=R_MIDDLE_COLUMN, row_num=ee)
+
+            # Create a current status label for the node
+            ee = create_widget_object(ttk.Label(status_logging_frame,
+                                                textvariable=self.current_status_messages[node_name]),
+                                      col_num=RR_MIDDLE_COLUMN, row_num=ee)
+
+            # Create a radio button to select the status
+            ee = create_widget_object(
+                ttk.Radiobutton(status_logging_frame, text="", variable=self.selected_node, value=node_name,
+                                command=self.select_node),
+                col_num=RIGHT_COLUMN, row_num=ee, increment_row=True)
+
+        # Define logging window
+        self.status_label = ScrolledText(status_logging_frame, wrap=WORD, width=35)
+        self.status_label.configure(state=DISABLED)
+        ee = create_widget_object(self.status_label, col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
+                                  row_num=0, row_span=len(self.node_names_all))
+
+        # Add to the log
+        self.ui_update_log('Application started')
+
+        temp_msg = log_message(source=USER_INTERFACE, message='ACTIVE')
+        temp_msg.header.stamp = Time.now()
+        self.update_status(temp_msg)
+
+        # Select the user interface node to display
+        self.selected_node.set(USER_INTERFACE)
+        self.select_node()
+
+        # endregion
+        # ----------------------------------------
+
         # ---------------------------------------
         # Create ROS components of the User Interface
         # region
-
-        # Startup the node
-        init_node(USER_INTERFACE)
 
         # Define custom shutdown behavior
         on_shutdown(self.shutdown_node)
 
         # Wait for the services to be built
-        wait_for_service(IPR_REGISTERED_DATA_SAVE_LOCATION)
-        wait_for_service(NRTS_REGISTERED_DATA_LOAD_LOCATION)
-        wait_for_service(VG_REGISTERED_DATA_LOAD_LOCATION)
-        wait_for_service(VG_VOLUME_DATA_SAVE_LOCATION)
+        # wait_for_service(IPR_REGISTERED_DATA_SAVE_LOCATION)
+        # wait_for_service(NRTS_REGISTERED_DATA_LOAD_LOCATION)
+        # wait_for_service(VG_REGISTERED_DATA_LOAD_LOCATION)
+        # wait_for_service(VG_VOLUME_DATA_SAVE_LOCATION)
 
         try:
             # Define the trajectory management node client proxies
@@ -214,6 +357,9 @@ class UserInterface(BasicNode):
                                                                          BoolRequest)
         self.identify_thyroid_from_points_command_service = ServiceProxy(IB_UI_IDENTIFY_THYROID_FROM_POINTS,
                                                                          BoolRequest)
+
+        # Define the real-time segmentation service proxies
+        self.set_segmentation_phase_service = ServiceProxy(RTS_SET_SEGMENTATION_PHASE, StringRequest)
 
         # Define the image position registration service proxies
         self.register_new_data_service = ServiceProxy(IPR_REGISTER_NEW_DATA, BoolRequest)
@@ -280,8 +426,11 @@ class UserInterface(BasicNode):
         # Create a subscriber to listen to the external force felt by the robot
         Subscriber(ROBOT_DERIVED_FORCE, WrenchStamped, self.robot_sensed_force_callback)
 
-        # Create a subscriber to hear debug messages
-        Subscriber(LOGGING, log_message, self.debug_status_messages_callback)
+        # Create a subscriber to hear node logging messages
+        Subscriber(LOGGING, log_message, self.log_messages_callback)
+
+        # Create a subscriber to hear node statuses
+        Subscriber(STATUS, log_message, self.node_statuses_callback)
 
         # Create a subscriber to listen for when the trajectory has been completed
         Service(UI_TRAJECTORY_COMPLETE, BoolRequest, self.trajectory_complete_handler)
@@ -297,48 +446,6 @@ class UserInterface(BasicNode):
         # -------------------------------------------
         # Create GUI components of the User Interface
         # region
-
-        # Define parameters used in the logic of the GUI
-        self.currently_using_image_control = False
-        self.currently_using_force_feedback = False
-        self.currently_using_pose_feedback = False
-        self.currently_using_balancing_feedback = False
-
-        # Define a variable to hold the velocity to publish for the manual control
-        self.manual_control_velocity_message = None
-
-        # Set the title of the window
-        self.parent.title("User Interface")
-
-        # Define the frame in which all objects will be created
-        main_content_frame = Frame(parent)
-
-        # Define a frame to hold the always visible control buttons
-        button_controls_frame = Frame(main_content_frame)
-
-        # Define a frame to hold the robot control buttons
-        robot_controls_frame = Frame(main_content_frame)
-
-        # Define a notebook to manage the tabs within the GUI
-        tab_controller = ttk.Notebook(main_content_frame)
-
-        # Define the frames that will be used in the tabs
-        exam_setup_frame = ttk.Frame(tab_controller)
-        thyroid_exam_frame = ttk.Frame(tab_controller)
-        nodule_exam_frame = ttk.Frame(tab_controller)
-        status_logging_frame = ttk.Frame(tab_controller)
-        developer_frame = ttk.Frame(tab_controller)
-        experimentation_frame = ttk.Frame(tab_controller)
-
-        # Add the frames to the tab controller
-        tab_controller.add(exam_setup_frame, text="Exam Setup")
-        tab_controller.add(thyroid_exam_frame, text="Thyroid Exam")
-        # tab_controller.add(nodule_exam_frame, text="Nodule Exam")
-        tab_controller.add(status_logging_frame, text="Status Logger")
-        if passed_arguments.experimentation_mode:
-            tab_controller.add(developer_frame, text="Developer")
-        if passed_arguments.experimentation_mode:
-            tab_controller.add(experimentation_frame, text="Experimentation")
 
         # Define the widgets used in the button_controls_frame
         # region
@@ -386,6 +493,9 @@ class UserInterface(BasicNode):
         self.pose_control_button = ttk.Button(button_controls_frame, text=STOP_POSE_CONTROL,
                                               command=self.pose_control_button_callback, state=DISABLED)
         aa = create_widget_object(self.pose_control_button, col_num=RR_MIDDLE_COLUMN, row_num=aa)
+
+        # Update the status log
+        self.ui_update_log('Button controls added')
 
         # endregion
 
@@ -542,6 +652,10 @@ class UserInterface(BasicNode):
             Radiobutton(robot_controls_frame, text="Fast", variable=self.speed_selector_variable,
                         value=125, command=self.speed_selector_callback),
             col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=bb, increment_row=True)
+
+        # Update the status log
+        self.ui_update_log('Robot controls added')
+
         # endregion
 
         # Define the widgets used in the exam_setup_frame
@@ -726,6 +840,9 @@ class UserInterface(BasicNode):
                                                       visualization=visualization)),
                                   col_num=RIGHT_COLUMN, row_num=cc, increment_row=True)
 
+        # Update the status log
+        self.ui_update_log('Exam setup page added')
+
         # endregion
 
         # Define the widgets used to populate the thyroid exam frame
@@ -906,21 +1023,8 @@ class UserInterface(BasicNode):
         dd = create_widget_object(ttk.Label(thyroid_exam_frame, text='ml'),
                                   col_num=L_MIDDLE_COLUMN, row_num=dd)
 
-        # endregion
-
-        # Define the widgets used to populate the status_logging_frame
-        # region
-
-        # Define row counter
-        ee = 0
-
-        # Define logging window
-        self.status_log_string = "Application started."
-        self.status_label = ScrolledText(status_logging_frame, wrap=WORD)
-        self.status_label.insert(INSERT, self.status_log_string)
-        self.status_label.configure(state=DISABLED)
-        ee = create_widget_object(self.status_label, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
-                                  row_num=ee, row_span=SINGLE_ROW, increment_row=True)
+        # Update the status log
+        self.ui_update_log('Thyroid exam page added')
 
         # endregion
 
@@ -1159,6 +1263,15 @@ class UserInterface(BasicNode):
                                                   self.visualization_check_button_callback(
                                                       visualization=visualization)),
                                   col_num=R_MIDDLE_COLUMN, row_num=ff, increment_row=True)
+
+        self.segmentation_phase_button = ttk.Button(developer_frame, text=SET_TO_REST_PHASE,
+                                                    command=self.segmentation_phase_button_callback)
+        ff = create_widget_object(self.segmentation_phase_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH,
+                                  row_num=ff, increment_row=True)
+
+        # Update the status log
+        self.ui_update_log('Developer page added')
+
         # endregion
 
         # Define the widgets used to populate the experimentation window
@@ -1394,6 +1507,10 @@ class UserInterface(BasicNode):
                                               command=self.create_noise_button_callback)
         gg = create_widget_object(self.create_noise_button, col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=gg,
                                   increment_row=True)
+
+        # Update the status log
+        self.ui_update_log('Experimentation page added')
+
         # endregion
 
         # Add the parent frame as the only grid object in the window
@@ -2135,6 +2252,19 @@ class UserInterface(BasicNode):
         else:
             raise Exception(str(visualization) + ' is not a recognized visualization variable.')
 
+    def segmentation_phase_button_callback(self):
+        if self.segmentation_phase_button[WIDGET_TEXT] == SET_TO_REST_PHASE:
+            response: StringRequestResponse = self.set_segmentation_phase_service(REST_PHASE)
+            if response.was_succesful:
+                self.segmentation_phase_button[WIDGET_TEXT] = SET_TO_GROWTH_PHASE
+        elif self.segmentation_phase_button[WIDGET_TEXT] == SET_TO_GROWTH_PHASE:
+            response: StringRequestResponse = self.set_segmentation_phase_service(GROWTH_PHASE)
+            if response.was_succesful:
+                self.segmentation_phase_button[WIDGET_TEXT] = SET_TO_REST_PHASE
+        else:
+            raise Exception(self.segmentation_phase_button[WIDGET_TEXT] + ' is not recognized.')
+
+
     # endregion
     ############################################################################
 
@@ -2155,8 +2285,11 @@ class UserInterface(BasicNode):
         except AttributeError:
             pass
 
-    def debug_status_messages_callback(self, data: log_message):
+    def node_statuses_callback(self, data: log_message):
         self.update_status(data)
+
+    def log_messages_callback(self, data: log_message):
+        self.update_log(data)
 
     def all_data_saved_callback(self, msg: Bool):
         try:
@@ -2185,8 +2318,14 @@ class UserInterface(BasicNode):
     #############################################################################
     # Define Helpers
     # region
-    # noinspection PyTypeChecker
-    def update_status(self, message: log_message = None) -> None:
+    def update_status(self, message: log_message):
+        timestamp = datetime.fromtimestamp(message.header.stamp.to_time()).strftime('%H:%M:%S')
+        if message is not None and message.source in self.node_names_all and \
+                self.current_status_messages[message.source] != message.message:
+            self.current_status_times[message.source].set(timestamp)
+            self.current_status_messages[message.source].set(message.message + '.')
+
+    def update_log(self, message: log_message) -> None:
         """
         Defines a function to update the status label at the bottom of the window with a given message.
 
@@ -2196,13 +2335,37 @@ class UserInterface(BasicNode):
             The message to be displayed. A period will be added to the end of this message automatically.
             If no message is given, the empty status string will be shown.
         """
-        if message is not None:
-            pass
-            """self.status_log_string = self.status_log_string + '\n' + message.message + "."
+        if message is not None and message.source in self.node_names_all:
+
+            timestamp = datetime.fromtimestamp(message.header.stamp.to_time()).strftime('%H:%M:%S')
+
+            if self.current_status_messages[message.source] != message.message:
+                # self.current_status_messages[message.source].set(message.message + '.')
+                self.status_log_dict[message.source].append(timestamp + ': ' + message.message + '.')
+                if len(self.status_log_dict[message.source]) > MAXIMUM_STATUS_MESSAGES:
+                    self.status_log_dict[message.source].pop(0)
+                self.select_node()
+                # self.status_log_string = self.status_log_string + '\n' + message.message + "."
+                # self.status_label.configure(state=NORMAL)
+                # self.status_label.delete('1.0', END)
+                # self.status_label.insert(INSERT, self.status_log_string)
+                # self.status_label.configure(state=DISABLED)
+
+    def select_node(self):
+        if self.selected_node.get() in self.node_names_all:
             self.status_label.configure(state=NORMAL)
             self.status_label.delete('1.0', END)
-            self.status_label.insert(INSERT, self.status_log_string)
-            self.status_label.configure(state=DISABLED)"""
+            temp_list = copy(self.status_log_dict[self.selected_node.get()])
+            delimiter = '\n'
+            if len(temp_list) > 1:
+                temp_list.reverse()
+            self.status_label.insert(INSERT, delimiter.join(temp_list))
+            self.status_label.configure(state=DISABLED)
+
+    def ui_update_log(self, this_message: str):
+        temp_msg = log_message(source=USER_INTERFACE, message=this_message)
+        temp_msg.header.stamp = Time.now()
+        self.update_log(temp_msg)
 
     # endregion
     #############################################################################

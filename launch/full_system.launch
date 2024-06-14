@@ -27,12 +27,12 @@
    
     <include file="$(find thyroid_ultrasound_robot_control)/launch/robot_bringup.launch" if="$(arg include_robot)"/>
     
-    <node name="ExperimentalDataRecorder" pkg="thyroid_ultrasound_high_level_control" type="ExperimentalDataRecorder.py" if="$(arg conduct_experiment)"/>
+    <node name="ExperimentDataRecorder" pkg="thyroid_ultrasound_high_level_control" type="ExperimentalDataRecorder.py" if="$(arg conduct_experiment)"/>
     <node name="ExperimentNoiseMaker" pkg="thyroid_ultrasound_high_level_control" type="ExperimentNoiseMaker.py" if="$(arg conduct_experiment)"/>
    
-    <node name="rqt_gui" pkg="rqt_gui" type="rqt_gui"/>
+    <node name="rqt_gui" pkg="rqt_gui" type="rqt_gui" if="$(eval arg('testing_mode') or arg('conduct_experiment'))"/>
     
-    <node name="ControllerTuningGraphsNode" pkg="thyroid_ultrasound_high_level_control" type="ControllerTuningGraphsNode.py" />
+    <node name="ControllerTuningGraphs" pkg="thyroid_ultrasound_high_level_control" type="ControllerTuningGraphsNode.py" if="$(eval arg('testing_mode') or arg('conduct_experiment'))"/>
     
     
     

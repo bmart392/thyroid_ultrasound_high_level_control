@@ -9,6 +9,7 @@ File containing UserInterface class.
 
 # Import standard packages
 from tkinter import *
+from tkinter.messagebox import askquestion
 from tkinter.scrolledtext import ScrolledText
 from tkinter.filedialog import askdirectory
 import tkinter.ttk as ttk
@@ -195,6 +196,9 @@ class UserInterface(BasicNode):
 
         # Define a variable to hold the velocity to publish for the manual control
         self.manual_control_velocity_message = None
+
+        # Define a variable for storing a pop-up window
+        self.pop_up_window = None
 
         # Set the title of the window
         self.parent.title("User Interface")
@@ -432,8 +436,11 @@ class UserInterface(BasicNode):
         # Create a subscriber to hear node statuses
         Subscriber(STATUS, log_message, self.node_statuses_callback)
 
-        # Create a subscriber to listen for when the trajectory has been completed
+        # Create a service for when the trajectory has been completed
         Service(UI_TRAJECTORY_COMPLETE, BoolRequest, self.trajectory_complete_handler)
+
+        # Create a service for to get the user input on finishing the scan
+        Service(UI_USER_FINISH_SCAN, ActionRequest, self.user_finish_scan_handler)
 
         # Create subscribers to listen for the progress of the volume generation node
         Subscriber(EXP_ALL_DATA_SAVED, Bool, self.all_data_saved_callback)
@@ -1809,6 +1816,22 @@ class UserInterface(BasicNode):
             self.save_experiment_data_button_callback(action=STOP_SAVING_EXPERIMENT_DATA)
         return BoolRequestResponse(True, NO_ERROR)
 
+    def user_finish_scan_handler(self, req: ActionRequestRequest):
+
+        # Create a pop-up window
+        res = askquestion('Segmentation Failed',
+                          'Would you like to end the trajectory?')
+
+        # End the trajectory
+        if res == 'yes':
+            self.pose_control_button_callback()
+
+        # Otherwise have the patient update the mask
+        elif res == 'no':
+            self.identify_thyroid_from_points_button_callback()
+
+        return ActionRequestResponse(True, NO_ERROR)
+
     def generate_volume_button_callback(self) -> None:
         """
         Publish the command to generate a volume from the ultrasound images.
@@ -2011,7 +2034,7 @@ class UserInterface(BasicNode):
         # Set the state to be that the robot is not currently using force_feedback
         self.currently_using_pose_feedback = False
 
-        # Publish the command to stop using force feedback
+        # Publish the command to stop using pose feedback
         self.use_pose_feedback_command_service(self.currently_using_pose_feedback)
 
         # Publish the command to clear the trajectory

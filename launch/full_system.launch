@@ -7,6 +7,7 @@
     <arg name="testing_mode" default="false"/>
     <arg name="include_robot" default="true"/>
     <arg name="conduct_experiment" default="false"/>
+    <arg name="simulate_robot" default="false"/>
     
     <!-- start the experiment controller -->
     <node name="UserInterface" pkg="thyroid_ultrasound_high_level_control" type="UserInterface.py" if="$(eval not arg('testing_mode') and not arg('conduct_experiment'))"/>
@@ -25,7 +26,9 @@
     
     <include file="$(find thyroid_ultrasound_imaging)/launch/real_data.launch" unless="$(arg testing_mode)"/>
    
-    <include file="$(find thyroid_ultrasound_robot_control)/launch/robot_bringup.launch" if="$(arg include_robot)"/>
+    <include file="$(find thyroid_ultrasound_robot_control)/launch/robot_bringup.launch" if="$(arg include_robot)">
+    	<arg name="simulate_robot" value="$(arg simulate_robot)"/>
+    </include>
     
     <node name="ExperimentDataRecorder" pkg="thyroid_ultrasound_high_level_control" type="ExperimentalDataRecorder.py" if="$(arg conduct_experiment)"/>
     <node name="ExperimentNoiseMaker" pkg="thyroid_ultrasound_high_level_control" type="ExperimentNoiseMaker.py" if="$(arg conduct_experiment)"/>

@@ -113,7 +113,7 @@ GRAPHICS_WINDOW: int = int(3)
 EMPTY_STATUS: str = "STATUS: "
 
 # Define the maximum number of status messages to save
-MAXIMUM_STATUS_MESSAGES: int = int(50)
+MAXIMUM_STATUS_MESSAGES: int = int(500)
 
 # Define function mode constants
 TESTING: int = int(0)

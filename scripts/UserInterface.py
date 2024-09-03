@@ -2278,11 +2278,11 @@ class UserInterface(BasicNode):
     def segmentation_phase_button_callback(self):
         if self.segmentation_phase_button[WIDGET_TEXT] == SET_TO_REST_PHASE:
             response: StringRequestResponse = self.set_segmentation_phase_service(REST_PHASE)
-            if response.was_succesful:
+            if response.was_successful:
                 self.segmentation_phase_button[WIDGET_TEXT] = SET_TO_GROWTH_PHASE
         elif self.segmentation_phase_button[WIDGET_TEXT] == SET_TO_GROWTH_PHASE:
             response: StringRequestResponse = self.set_segmentation_phase_service(GROWTH_PHASE)
-            if response.was_succesful:
+            if response.was_successful:
                 self.segmentation_phase_button[WIDGET_TEXT] = SET_TO_REST_PHASE
         else:
             raise Exception(self.segmentation_phase_button[WIDGET_TEXT] + ' is not recognized.')

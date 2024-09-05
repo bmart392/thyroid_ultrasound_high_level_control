@@ -154,7 +154,7 @@ class ExperimentDataRecorder(BasicNode):
         Subscriber(RC_PATIENT_CONTACT_ERROR, Float64Stamped, self.skin_error_callback)
 
         # Create a subscriber for when a waypoint is reached
-        Subscriber(RC_POSITION_GOAL_LIN_X_REACHED, Bool, self.pose_waypoint_reached_callback)
+        Subscriber(RC_POSITION_CONTROL_GOAL_REACHED, Bool, self.pose_waypoint_reached_callback)
 
         # Create a subscriber to listen for the robot transformation
         Subscriber(ARMER_STATE, ManipulatorState, self.robot_pose_callback)

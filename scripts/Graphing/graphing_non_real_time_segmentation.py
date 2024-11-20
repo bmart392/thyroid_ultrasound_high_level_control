@@ -26,7 +26,7 @@ from thyroid_ultrasound_imaging_support.Boundaries.create_convex_triangles_from_
 from thyroid_ultrasound_imaging_support.Boundaries.create_mask_array_from_triangles import \
     create_mask_array_from_triangles
 from thyroid_ultrasound_imaging_support.Validation.calculate_dice_score import calculate_dice_score
-from Graphing.read_recorded_data_csv import read_recorded_data_csv,   FIG_WIDTH, FIG_HEIGHT
+from thyroid_ultrasound_support.Functions.read_recorded_data_csv import read_recorded_data_csv,   FIG_WIDTH, FIG_HEIGHT
 from thyroid_ultrasound_imaging_support.Visualization.create_mask_overlay_array import create_mask_overlay_array, \
     COLORIZED
 

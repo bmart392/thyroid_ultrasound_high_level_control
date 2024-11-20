@@ -1,5 +1,5 @@
 # Import standard python packages
-from csv import DictReader, DictWriter
+from csv import DictWriter
 from matplotlib.pyplot import show, subplots, rc
 from numpy import array
 from statistics import stdev, mean
@@ -7,7 +7,7 @@ from statistics import stdev, mean
 # Import custom python packages
 from ExperimentalDataRecorder import MESSAGE_ID, STAMP_SECS, STAMP_NSECS, \
     POSE_X, POSE_Y, POSE_Z, POSE_ROLL, POSE_PITCH, POSE_YAW, WAYPOINT_REACHED
-from Graphing.read_recorded_data_csv import read_recorded_data_csv, COMBINED_STAMP, CONTROLLED, UNCONTROLLED, \
+from thyroid_ultrasound_support.Functions.read_recorded_data_csv import read_recorded_data_csv, COMBINED_STAMP, \
     FIG_WIDTH, FIG_HEIGHT
 from thyroid_ultrasound_robot_control_support.Helpers.calc_inverse import calc_inverse
 from thyroid_ultrasound_robot_control_support.Helpers.calc_transformation_from_rpy import calc_transformation_from_rpy

@@ -25,10 +25,12 @@ from std_msgs.msg import Int8
 # Import custom python packages
 from thyroid_ultrasound_imaging_support.Visualization.VisualizationConstants import *
 from thyroid_ultrasound_support.Constants.SharedConstants import REST_PHASE, GROWTH_PHASE
+from thyroid_ultrasound_robot_control_support.TracjectoryManagementNodeConstants import SINGLE_DIRECTION, X_AXIS_OFFSET, \
+    BI_DIRECTION, DUAL_LOBE_SCAN, FULL_STOP
 
 # Import custom ROS packages
 from thyroid_ultrasound_support.BasicNode import *
-from thyroid_ultrasound_messages.msg import SaveExperimentDataCommand
+from thyroid_ultrasound_messages.msg import SaveExperimentDataCommand, TemporarySegmentationStatus
 
 # Define constants used for logging purposes
 VERBOSE: int = int(0)
@@ -79,6 +81,8 @@ ACTIVATE_MANUAL_CONTROLS: str = "Activate\nManual Controls"
 DEACTIVATE_MANUAL_CONTROLS: str = "Deactivate\nManual Controls"
 SET_TO_REST_PHASE: str = 'Set to Rest Phase'
 SET_TO_GROWTH_PHASE: str = 'Set to Growth Phase'
+APPLY_CURRENT_TIME: str = 'Press to Apply Current Time to Images'
+USE_ORIGINAL_TIME: str = 'Press to Apply Original Capture Time of Images'
 
 # Define constants for parameters of widgets
 WIDGET_TEXT: str = 'text'
@@ -282,10 +286,47 @@ class UserInterface(BasicNode):
                                 command=self.select_node),
                 col_num=RIGHT_COLUMN, row_num=ee, increment_row=True)
 
+        # Add a divider
+        ee = create_horizontal_separator(status_logging_frame, ee)
+
+        # Add additional status things to monitor
+        self.current_mask_area_percentage_var = StringVar(value="00.000")
+        self.bright_area_removal_active_var = StringVar(value=str(False))
+        self.sure_foreground_creation_score_var = StringVar(value="0.000")
+        self.sure_background_creation_score_var = StringVar(value="0.000")
+
+        ee = create_widget_object(ttk.Label(status_logging_frame, text="Mask Area Percentage:",
+                                            justify=LEFT),
+                                  col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=ee)
+        ee = create_widget_object(ttk.Label(status_logging_frame, textvariable=self.current_mask_area_percentage_var,
+                                            justify=LEFT), col_num=L_MIDDLE_COLUMN, col_span=TWO_COLUMN,
+                                  row_num=ee, increment_row=True)
+
+        ee = create_widget_object(ttk.Label(status_logging_frame, text="Bright Area Removed:",
+                                            justify=LEFT),
+                                  col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=ee)
+        ee = create_widget_object(ttk.Label(status_logging_frame, textvariable=self.bright_area_removal_active_var,
+                                            justify=LEFT), col_num=L_MIDDLE_COLUMN, col_span=TWO_COLUMN,
+                                  row_num=ee, increment_row=True)
+
+        ee = create_widget_object(ttk.Label(status_logging_frame, text="Sure Fgrnd. Score:",
+                                            justify=LEFT),
+                                  col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=ee)
+        ee = create_widget_object(ttk.Label(status_logging_frame, textvariable=self.sure_foreground_creation_score_var,
+                                            justify=LEFT), col_num=L_MIDDLE_COLUMN, col_span=TWO_COLUMN,
+                                  row_num=ee, increment_row=True)
+
+        ee = create_widget_object(ttk.Label(status_logging_frame, text="Sure Bgrnd. Score:",
+                                            justify=LEFT),
+                                  col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=ee)
+        ee = create_widget_object(ttk.Label(status_logging_frame, textvariable=self.sure_background_creation_score_var,
+                                            justify=LEFT), col_num=L_MIDDLE_COLUMN, col_span=TWO_COLUMN,
+                                  row_num=ee, increment_row=True)
+
         # Define logging window
         self.status_label = ScrolledText(status_logging_frame, wrap=WORD, width=35)
         self.status_label.configure(state=DISABLED)
-        ee = create_widget_object(self.status_label, col_num=LEFT_COLUMN, col_span=SINGLE_COLUMN,
+        ee = create_widget_object(self.status_label, col_num=LEFT_COLUMN, col_span=FOUR_COLUMN,
                                   row_num=0, row_span=len(self.node_names_all))
 
         # Add to the log
@@ -322,9 +363,9 @@ class UserInterface(BasicNode):
             self.tm_override_image_balanced_service = ServiceProxy(TM_OVERRIDE_IMAGE_BALANCED, BoolRequest)
             self.tm_override_image_centered_service = ServiceProxy(TM_OVERRIDE_IMAGE_CENTERED, BoolRequest)
             self.tm_override_data_registered_service = ServiceProxy(TM_OVERRIDE_DATA_REGISTERED, BoolRequest)
-            self.create_trajectory_service = ServiceProxy(TM_CREATE_TRAJECTORY, Float64Request)
+            self.initiate_scan_service = ServiceProxy(TM_INITIATE_SCAN, InitiateScan)
             self.image_spacing_selection_service = ServiceProxy(TM_SET_TRAJECTORY_SPACING, Float64Request)
-            self.clear_trajectory_service = ServiceProxy(TM_CLEAR_TRAJECTORY, BoolRequest)
+            self.interrupt_trajectory_service = ServiceProxy(TM_INTERRUPT_TRAJECTORY, StringRequest)
             self.registered_data_save_location_service = ServiceProxy(IPR_REGISTERED_DATA_SAVE_LOCATION, StringRequest)
         except ServiceException:
             pass
@@ -354,6 +395,7 @@ class UserInterface(BasicNode):
             self.restart_image_streaming_command_service = ServiceProxy(CS_IMAGE_STREAMING_RESTART, BoolRequest)
             self.reverse_stream_order_service = ServiceProxy(CS_IMAGE_STREAMING_REVERSE_PLAYBACK_DIRECTION, BoolRequest)
             self.image_streaming_frequency_service = ServiceProxy(CS_IMAGE_STREAMING_SET_FREQUENCY, Float64Request)
+            self.apply_new_timestamps_service = ServiceProxy(CS_APPLY_NEW_TIMESTAMP, BoolRequest)
 
         # Define the image based user input node service proxies
         self.generate_new_image_cropping_command_service = ServiceProxy(IB_UI_CROP_IMAGE_FROM_POINTS, BoolRequest)
@@ -437,7 +479,7 @@ class UserInterface(BasicNode):
         Subscriber(STATUS, log_message, self.node_statuses_callback)
 
         # Create a service for when the trajectory has been completed
-        Service(UI_TRAJECTORY_COMPLETE, BoolRequest, self.trajectory_complete_handler)
+        Service(UI_SCANNING_COMPLETE, BoolRequest, self.scanning_complete_handler)
 
         # Create a service for to get the user input on finishing the scan
         Service(UI_USER_FINISH_SCAN, ActionRequest, self.user_finish_scan_handler)
@@ -446,6 +488,10 @@ class UserInterface(BasicNode):
         Subscriber(EXP_ALL_DATA_SAVED, Bool, self.all_data_saved_callback)
         Subscriber(EXP_DATA_REMAINING_TO_SAVE, String, self.remaining_data_callback)
         Subscriber(VOLUME_DATA, Float64, self.volume_data_result_callback)
+
+        # Create a temporary subscriber to listen for the image segmentation statuses
+        Subscriber('/system/temporary_segmentation_status', TemporarySegmentationStatus,
+                   self.temporary_segmentation_status_callback)
 
         # endregion
         # ---------------------------------------
@@ -905,7 +951,7 @@ class UserInterface(BasicNode):
 
         # Define the scan label
         dd = create_widget_object(
-            ttk.Label(thyroid_exam_frame, text="Scanning Distance"),
+            ttk.Label(thyroid_exam_frame, text="Single Direction\nScanning Distance:"),
             col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=dd)
 
         # Define the scan distance entry field
@@ -930,6 +976,20 @@ class UserInterface(BasicNode):
                                                command=self.scan_negative_button_callback,
                                                state=DISABLED)
         dd = create_widget_object(self.scan_negative_button, col_num=RIGHT_COLUMN, row_num=dd, increment_row=True)
+
+        # Define the bidirectional scan button
+        self.bi_direction_scan_button = ttk.Button(thyroid_exam_frame, text='Bidirectionally Scan',
+                                                   command=self.bi_direction_scan_button_callback,
+                                                   state=DISABLED)
+        dd = create_widget_object(self.bi_direction_scan_button, col_num=LEFT_COLUMN, col_span=FOUR_COLUMN,
+                                  row_num=dd)
+
+        # Define the dual lobe scan button
+        self.dual_lobe_scan_button = ttk.Button(thyroid_exam_frame, text='Dual Lobe Scan',
+                                                command=self.dual_lobe_scan_button_callback,
+                                                state=DISABLED)
+        dd = create_widget_object(self.dual_lobe_scan_button, col_num=RL_MIDDLE_COLUMN, col_span=FOUR_COLUMN,
+                                  row_num=dd, increment_row=True)
 
         # Create a horizontal separator
         dd = create_horizontal_separator(thyroid_exam_frame, dd)
@@ -1218,54 +1278,63 @@ class UserInterface(BasicNode):
         ff = create_widget_object(ttk.Label(developer_frame, text="Select the masks\n to display:"),
                                   col_num=LEFT_COLUMN, col_span=TWO_COLUMN, row_num=ff)
 
-        # Define the selection variables
-        self.show_result_mask_variable = IntVar(value=0)
-        self.show_post_processed_mask_variable = IntVar(value=0)
-        self.show_sure_foreground_mask_variable = IntVar(value=0)
-        self.show_sure_background_mask_variable = IntVar(value=0)
-        self.show_probable_foreground_mask_variable = IntVar(value=0)
-        self.show_initialization_mask_variable = IntVar(value=0)
-        self.show_grabcut_user_initialization_0_mask_variable = IntVar(value=0)
+        # Define the variables to store the selections
+        self.show_visualization_variables.update({
+            SHOW_MASK: IntVar(value=0),
+            SHOW_POST_PROCESSED_MASK: IntVar(value=0),
+            SHOW_SURE_FOREGROUND: IntVar(value=0),
+            SHOW_SURE_BACKGROUND: IntVar(value=0),
+            SHOW_PROBABLE_FOREGROUND: IntVar(value=0),
+            SHOW_INITIALIZED_MASK: IntVar(value=0),
+            SHOW_GRABCUT_USER_INITIALIZATION_0: IntVar(value=0)
+        })
 
         # Define the widgets
         ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Result',
-                                                  variable=self.show_result_mask_variable,
+                                                  variable=self.show_visualization_variables[
+                                                      SHOW_MASK],
                                                   command=lambda visualization=SHOW_MASK:
                                                   self.visualization_check_button_callback(
                                                       visualization=visualization)),
                                   col_num=L_MIDDLE_COLUMN, row_num=ff)
         ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Post-processed',
-                                                  variable=self.show_post_processed_mask_variable,
+                                                  variable=self.show_visualization_variables[
+                                                      SHOW_POST_PROCESSED_MASK],
                                                   command=lambda visualization=SHOW_POST_PROCESSED_MASK:
                                                   self.visualization_check_button_callback(
                                                       visualization=visualization)),
                                   col_num=MIDDLE_COLUMN, row_num=ff)
         ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Sure-\nforeground',
-                                                  variable=self.show_sure_foreground_mask_variable,
+                                                  variable=self.show_visualization_variables[
+                                                      SHOW_SURE_FOREGROUND],
                                                   command=lambda visualization=SHOW_SURE_FOREGROUND:
                                                   self.visualization_check_button_callback(
                                                       visualization=visualization)),
                                   col_num=R_MIDDLE_COLUMN, row_num=ff)
         ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Sure-\nbackground',
-                                                  variable=self.show_sure_background_mask_variable,
+                                                  variable=self.show_visualization_variables[
+                                                      SHOW_SURE_BACKGROUND],
                                                   command=lambda visualization=SHOW_SURE_BACKGROUND:
                                                   self.visualization_check_button_callback(
                                                       visualization=visualization)),
                                   col_num=RIGHT_COLUMN, row_num=ff, increment_row=True)
         ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Probable-\nforeground',
-                                                  variable=self.show_probable_foreground_mask_variable,
+                                                  variable=self.show_visualization_variables[
+                                                      SHOW_PROBABLE_FOREGROUND],
                                                   command=lambda visualization=SHOW_PROBABLE_FOREGROUND:
                                                   self.visualization_check_button_callback(
                                                       visualization=visualization)),
                                   col_num=L_MIDDLE_COLUMN, row_num=ff)
         ff = create_widget_object(ttk.Checkbutton(developer_frame, text='Initialization',
-                                                  variable=self.show_initialization_mask_variable,
+                                                  variable=self.show_visualization_variables[
+                                                      SHOW_INITIALIZED_MASK],
                                                   command=lambda visualization=SHOW_INITIALIZED_MASK:
                                                   self.visualization_check_button_callback(
                                                       visualization=visualization)),
                                   col_num=MIDDLE_COLUMN, row_num=ff)
         ff = create_widget_object(ttk.Checkbutton(developer_frame, text='User Initialization',
-                                                  variable=self.show_grabcut_user_initialization_0_mask_variable,
+                                                  variable=self.show_visualization_variables[
+                                                      SHOW_GRABCUT_USER_INITIALIZATION_0],
                                                   command=lambda visualization=SHOW_GRABCUT_USER_INITIALIZATION_0:
                                                   self.visualization_check_button_callback(
                                                       visualization=visualization)),
@@ -1331,6 +1400,11 @@ class UserInterface(BasicNode):
         gg = create_widget_object(ttk.Button(experimentation_frame, text='Send',
                                              command=self.set_new_streaming_frequency_callback),
                                   col_num=MIDDLE_COLUMN, row_num=gg, increment_row=True)
+        self.apply_new_timestamps_button = ttk.Button(experimentation_frame,
+                                                      text=USE_ORIGINAL_TIME,
+                                                      command=self.apply_new_timestamps_button_callback)
+        gg = create_widget_object(self.apply_new_timestamps_button,
+                                  col_num=LEFT_COLUMN, col_span=FULL_WIDTH, row_num=gg, increment_row=True)
 
         gg = create_horizontal_separator(experimentation_frame, gg)
 
@@ -1698,7 +1772,8 @@ class UserInterface(BasicNode):
         # self.scan_command_publisher.publish(
         #     Float64(float(self.scan_distance_entry.get()) / 100)  # convert cm to m
         # )
-        self.create_trajectory_service(float(self.scan_distance_entry.get()) / 100)
+        self.initiate_scan_service(scan_type=SINGLE_DIRECTION, optional_scan_axis=X_AXIS_OFFSET,
+                                   optional_scan_distance=float(self.scan_distance_entry.get()) / 100)
 
         # Update the pose control button
         self.update_pose_control_button()
@@ -1713,7 +1788,28 @@ class UserInterface(BasicNode):
         # self.scan_command_publisher.publish(
         #     Float64(-float(self.scan_distance_entry.get()) / 100)  # convert cm to m
         # )
-        self.create_trajectory_service(-float(self.scan_distance_entry.get()) / 100)
+        self.initiate_scan_service(scan_type=SINGLE_DIRECTION, optional_scan_axis=X_AXIS_OFFSET,
+                                   optional_scan_distance=-float(self.scan_distance_entry.get()) / 100)
+
+        # Update the pose control button
+        self.update_pose_control_button()
+
+        # Update the data saving button
+        self.save_experiment_data_button_callback(action=START_SAVING_EXPERIMENT_DATA)
+
+    def bi_direction_scan_button_callback(self):
+        """Publish the command to scan bidirectionally"""
+        self.initiate_scan_service(scan_type=BI_DIRECTION)
+
+        # Update the pose control button
+        self.update_pose_control_button()
+
+        # Update the data saving button
+        self.save_experiment_data_button_callback(action=START_SAVING_EXPERIMENT_DATA)
+
+    def dual_lobe_scan_button_callback(self):
+        """Publish the command to scan the both lobes"""
+        self.initiate_scan_service(scan_type=DUAL_LOBE_SCAN)
 
         # Update the pose control button
         self.update_pose_control_button()
@@ -1736,6 +1832,8 @@ class UserInterface(BasicNode):
             self.registered_data_save_location_str_var.set(selected_directory)
             self.scan_positive_button[WIDGET_STATE] = NORMAL
             self.scan_negative_button[WIDGET_STATE] = NORMAL
+            self.bi_direction_scan_button[WIDGET_STATE] = NORMAL
+            self.dual_lobe_scan_button[WIDGET_STATE] = NORMAL
 
     def registered_data_load_location_button_callback(self) -> None:
         """
@@ -1795,7 +1893,7 @@ class UserInterface(BasicNode):
         self.trajectory_following_button[WIDGET_TEXT] = PAUSE_TRAJECTORY
         self.trajectory_following_button[WIDGET_STATE] = NORMAL
 
-    def trajectory_complete_handler(self, req: BoolRequestRequest):
+    def scanning_complete_handler(self, req: BoolRequestRequest):
         """
         Resets the pose control and experiment data saving buttons.
         """
@@ -2039,7 +2137,7 @@ class UserInterface(BasicNode):
 
         # Publish the command to clear the trajectory
         # self.clear_trajectory_command_publisher.publish(Bool(True))
-        self.clear_trajectory_service(True)
+        self.interrupt_trajectory_service(FULL_STOP)
 
         # Set the state of the button
         self.pose_control_button[WIDGET_STATE] = DISABLED
@@ -2128,6 +2226,16 @@ class UserInterface(BasicNode):
 
     def set_new_streaming_frequency_callback(self) -> None:
         self.image_streaming_frequency_service(float(self.stream_data_rate_entry.get()))
+
+    def apply_new_timestamps_button_callback(self) -> None:
+        if self.apply_new_timestamps_button[WIDGET_TEXT] == APPLY_CURRENT_TIME:
+            self.apply_new_timestamps_service(True)
+            self.apply_new_timestamps_button[WIDGET_TEXT] = USE_ORIGINAL_TIME
+        elif self.apply_new_timestamps_button[WIDGET_TEXT] == USE_ORIGINAL_TIME:
+            self.apply_new_timestamps_service(False)
+            self.apply_new_timestamps_button[WIDGET_TEXT] = APPLY_CURRENT_TIME
+        else:
+            raise Exception("Button text was not recognized")
 
     def register_new_data_callback(self) -> None:
         self.register_new_data_service(True)
@@ -2287,7 +2395,6 @@ class UserInterface(BasicNode):
         else:
             raise Exception(self.segmentation_phase_button[WIDGET_TEXT] + ' is not recognized.')
 
-
     # endregion
     ############################################################################
 
@@ -2305,6 +2412,15 @@ class UserInterface(BasicNode):
         """
         try:
             self.current_force_string_var.set(str(round(data.wrench.force.z, 1)))
+        except AttributeError:
+            pass
+
+    def temporary_segmentation_status_callback(self, data: TemporarySegmentationStatus):
+        try:
+            self.current_mask_area_percentage_var.set(str(round(data.mask_area_percentage, 3)))
+            self.bright_area_removal_active_var.set(str(data.bright_area_removal_active))
+            self.sure_foreground_creation_score_var.set(str(round(data.sure_foreground_creation_score, 3)))
+            self.sure_background_creation_score_var.set(str(round(data.sure_background_creation_score, 3)))
         except AttributeError:
             pass
 

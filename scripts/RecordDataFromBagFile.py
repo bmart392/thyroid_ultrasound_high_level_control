@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 
 """
-File containing the ExperimentDataRecorder class.
+File containing the RecordDataFromBagFile class definition and main loop for ROS execution.
 """
-
-# TODO - Dream - Add proper logging through BasicNode class
-# TODO - Dream - Add proper error catching with exceptions
 
 # Import standard packages
 from os import mkdir
@@ -32,10 +29,10 @@ from thyroid_ultrasound_support.Constants.ExperimentalDataRecordingConstants imp
 # Import custom ROS packages
 from thyroid_ultrasound_support.BasicNode import *
 from thyroid_ultrasound_messages.msg import SaveExperimentDataCommand, image_data_message, \
-    Float64Stamped, ImageWithTimeData
+    Float64Stamped
 
 
-class ExperimentDataRecorder(BasicNode):
+class RecordDataFromBagFile(BasicNode):
 
     def __init__(self, path: str):
         """
@@ -121,7 +118,7 @@ class ExperimentDataRecorder(BasicNode):
         Subscriber(ROBOT_DERIVED_FORCE, WrenchStamped, self.robot_force_callback)
 
         # Create subscriber for the raw images
-        Subscriber(IMAGE_SOURCE, ImageWithTimeData, self.raw_image_callback)
+        Subscriber(IMAGE_SOURCE, Image, self.raw_image_callback)
 
         # Create a subscriber for the image data objects
         Subscriber(IMAGE_FILTERED, image_data_message, self.image_data_object_callback)
@@ -306,21 +303,21 @@ class ExperimentDataRecorder(BasicNode):
                                      STAMP_NSECS: message.header.stamp.nsecs,
                                      FORCE: message.wrench.force.z})
 
-    def raw_image_callback(self, msg: ImageWithTimeData):
+    def raw_image_callback(self, message: Image):
         """
         Adds the image captured by the ultrasound probe to the appropriate queue.
 
         Parameters
         ----------
-        msg : Image or ImageData
+        message
             A Image message containing the ultrasound image.
         """
         # If the raw images are being saved
         if self.record_raw_image and self.actively_queueing_data and self.raw_image_folder is not None:
             # Append the new data to the queue
             self.raw_image_queue.append({RAW_IMAGE_NAME: self.raw_image_folder + 'RawImage_' + str(
-                msg.capture_time.secs) + '_' + str(msg.capture_time.nsecs) + '.png',
-                                         RAW_IMAGE_ARRAY: cvtColor(convert_image_message_to_image_array(msg.data),
+                message.header.stamp.secs) + '_' + str(message.header.stamp.nsecs) + '.png',
+                                         RAW_IMAGE_ARRAY: cvtColor(convert_image_message_to_image_array(message),
                                                                    COLOR_GRAY2BGR)})
 
     def image_data_object_callback(self, message: image_data_message):
@@ -460,7 +457,7 @@ class ExperimentDataRecorder(BasicNode):
 if __name__ == '__main__':
 
     # Create the node object
-    node = ExperimentDataRecorder(path='/home/ben/thyroid_ultrasound_data/experimentation/')
+    node = RecordDataFromBagFile(path='/home/ben/thyroid_ultrasound_data/experimentation/')
 
     print("Node initialized.")
     print("Press ctrl+c to terminate.")

@@ -6,10 +6,9 @@ from statistics import median, stdev, mean
 # Import custom python packages
 from ExperimentalDataRecorder import MESSAGE_ID, STAMP_SECS, STAMP_NSECS, \
     POSE_X, POSE_Y, POSE_Z, POSE_ROLL, POSE_PITCH, POSE_YAW, \
-    FORCE, IMAGE_CENTROID, SKIN_ERROR, WAYPOINT_REACHED, \
-    FORCE_PREFIX, POSE_PREFIX, CENTROID_PREFIX, SKIN_ERROR_PREFIX
+    FORCE, IMAGE_CENTROID, SKIN_ERROR, FORCE_PREFIX, POSE_PREFIX, CENTROID_PREFIX, SKIN_ERROR_PREFIX
 
-from Graphing.read_recorded_data_csv import read_recorded_data_csv, COMBINED_STAMP, CONTROLLED, UNCONTROLLED, \
+from thyroid_ultrasound_support.Functions.read_recorded_data_csv import read_recorded_data_csv, COMBINED_STAMP, CONTROLLED, UNCONTROLLED, \
     FIG_WIDTH, FIG_HEIGHT
 
 # Define the default values to use when plotting

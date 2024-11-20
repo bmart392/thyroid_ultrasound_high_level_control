@@ -4,11 +4,11 @@ from math import atan2
 from matplotlib.pyplot import show, subplots, rc
 from numpy import rad2deg
 from numpy.polynomial import Polynomial
-from statistics import median, stdev, mean
+from statistics import stdev, mean
 
 # Import custom python packages
-from ExperimentalDataRecorder import MESSAGE_ID, STAMP_SECS, STAMP_NSECS, FORCE, POSE_Z, POSE_ROLL, SKIN_ERROR
-from Graphing.read_recorded_data_csv import read_recorded_data_csv, COMBINED_STAMP, CONTROLLED, UNCONTROLLED,\
+from ExperimentalDataRecorder import MESSAGE_ID, STAMP_SECS, STAMP_NSECS, POSE_ROLL, SKIN_ERROR
+from thyroid_ultrasound_support.Functions.read_recorded_data_csv import read_recorded_data_csv, COMBINED_STAMP, CONTROLLED, UNCONTROLLED,\
     FIG_WIDTH, FIG_HEIGHT
 
 # Set the default size for plot elements
